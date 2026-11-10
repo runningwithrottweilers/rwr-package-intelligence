@@ -33,6 +33,9 @@ sha256sums=("@SHA256@")
 
 build() {
     cd "$srcdir/$_srcname"
+    # makepkg.conf injects RUSTFLAGS (-C force-frame-pointers=yes); the release
+    # builder does not. Without this the binaries differ from the native package.
+    unset RUSTFLAGS DEBUG_RUSTFLAGS
     export RWR_BUILD_SOURCE="$srcdir"
     export RWR_BUILD_TARGET="${CARGO_TARGET_DIR:-$PWD/target}"
     export RUSTC_WRAPPER="$PWD/packaging/arch/release-rustc.sh"

@@ -75,7 +75,7 @@ find "$APPDIR" -exec touch -h -d "@$EPOCH" {} +
 
 echo "== 4/4 squashfs + runtime"
 IMG="$OUT/RWR-Package-Intelligence-$VERSION-x86_64.AppImage"
-mksquashfs "$APPDIR" "$OUT/AppDir.squashfs" -all-root -noappend -no-xattrs -comp zstd \
+env -u SOURCE_DATE_EPOCH mksquashfs "$APPDIR" "$OUT/AppDir.squashfs" -all-root -noappend -no-xattrs -comp zstd \
     -mkfs-time "$EPOCH" -all-time "$EPOCH" -quiet
 cat "$RUNTIME" "$OUT/AppDir.squashfs" > "$IMG"
 chmod 755 "$IMG"
