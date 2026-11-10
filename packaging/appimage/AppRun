@@ -1,0 +1,76 @@
+#!/bin/sh
+# RWR Package Intelligence AppImage entry point.
+# Starts the GUI. Never runs sudo, pkexec or pacman, and never installs anything:
+# the privileged backend is a separate pacman package the administrator installs.
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SHARE="$HERE/usr/share/rwr-package-intelligence"
+BUNDLED_VERSION=$(cat "$SHARE/backend/VERSION")
+BACKEND_PKG="rwr-package-intelligence-backend-${BUNDLED_VERSION}-x86_64.pkg.tar.zst"
+
+installed_version() {
+    # Either the integration package or the full native package provides the backend.
+    for name in rwr-package-intelligence-backend rwr-package-intelligence; do
+        version=$(pacman -Q "$name" 2>/dev/null | cut -d' ' -f2) || true
+        if [ -n "${version:-}" ]; then
+            printf '%s %s\n' "$name" "$version"
+            return 0
+        fi
+    done
+    return 1
+}
+
+backend_files_present() {
+    [ -x /usr/lib/rwr-package-intelligence/rwr-transaction-supervisor ] &&
+        [ -x /usr/lib/rwr-package-intelligence/rwr-update-helper ] &&
+        [ -f /usr/share/polkit-1/actions/io.github.runningwithrottweilers.rwr-package-intelligence.policy ] &&
+        [ -f /usr/lib/systemd/system/rwr-package-intelligence-system.socket ]
+}
+
+backend_info() {
+    echo "RWR Package Intelligence AppImage — backend status"
+    echo "Bundled backend package: $BACKEND_PKG"
+    echo "SHA256: $(cut -d' ' -f1 "$SHARE/backend/$BACKEND_PKG.sha256")"
+    if installed=$(installed_version); then
+        echo "Installed: $installed"
+        case "$installed" in
+            *" $BUNDLED_VERSION") echo "Version: matches this AppImage." ;;
+            *) echo "Version: DIFFERENT from this AppImage ($BUNDLED_VERSION). Install the matching backend before real updates." ;;
+        esac
+    else
+        echo "Installed: no backend package. Scanning works; real updates stay locked."
+    fi
+    if backend_files_present; then echo "Files: supervisor, helper, Polkit action and systemd units present."; fi
+    echo
+    echo "To install the backend (administrator, reviewed by you):"
+    echo "  \"\$APPIMAGE\" --extract-backend ~/rwr-backend"
+    echo "  cd ~/rwr-backend && sha256sum -c $BACKEND_PKG.sha256"
+    echo "  sudo pacman -U ./$BACKEND_PKG"
+    echo "Then follow BACKEND-DEPLOYMENT.md (sockets, optional execution policy)."
+}
+
+case "${1:-}" in
+    --backend-info)
+        backend_info
+        exit 0
+        ;;
+    --extract-backend)
+        target=${2:?usage: --extract-backend DIRECTORY}
+        mkdir -p -- "$target"
+        for file in "$BACKEND_PKG" "$BACKEND_PKG.sha256" INSTALL-APPIMAGE.md BACKEND-DEPLOYMENT.md; do
+            cp -- "$SHARE/backend/$file" "$target/$file"
+        done
+        (cd -- "$target" && sha256sum -c "$BACKEND_PKG.sha256")
+        echo "Extracted to $target. Nothing was installed."
+        exit 0
+        ;;
+esac
+
+if ! backend_files_present; then
+    echo "RWR: privileged backend not installed — real updates are locked. Run with --backend-info." >&2
+elif installed=$(installed_version) && [ "${installed##* }" != "$BUNDLED_VERSION" ]; then
+    echo "RWR: installed backend ($installed) differs from this AppImage ($BUNDLED_VERSION). Run with --backend-info." >&2
+fi
+
+exec "$HERE/usr/bin/rwr-package-intelligence" "$@"
