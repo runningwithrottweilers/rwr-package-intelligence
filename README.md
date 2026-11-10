@@ -82,6 +82,10 @@ To reproduce a build, you need matching Rust tools, cached dependencies, system 
 
 ## About RUNNING WITH ROTTWEILERS
 
+**Author & Lead Developer:** Artur Maciejewski
+
+**Developed and published by:** RUNNING WITH ROTTWEILERS
+
 RWR Package Intelligence is a project by **RUNNING WITH ROTTWEILERS**: Linux software with a distinct visual identity and a focus on giving users clear choices over what happens on their machines.
 
 [RUNNING WITH ROTTWEILERS website](https://runningwithrottweilers.github.io/) · [GitHub](https://github.com/runningwithrottweilers)
