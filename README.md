@@ -1,37 +1,91 @@
-# RWR Package Intelligence v0.1.0-beta
+# RWR Package Intelligence
 
-RWR is a GTK4 update planner and supervised full-system updater for Arch Linux x86_64. The interface supports Polish and English. It presents the prepared ALPM plan, including versions, dependencies and removals, before asking for approval. The Arch package for this beta candidate is `0.1.0-17`.
+**Know what's changing. Update Arch Linux with confidence.**
+
+Arch Linux moves fast. Keeping up with updates shouldn't mean guessing what will change on your system.
+
+**RWR Package Intelligence** brings package updates into a dark, X-Files-inspired desktop interface. See what's available, review the proposed changes, and decide when to proceed. It's a real Arch Linux updater, not just an update notification or a read-only demo.
+
+Built by **RUNNING WITH ROTTWEILERS** for Arch Linux x86_64, with an interface available in English and Polish.
+
+## What you can do
+
+- **See available updates.** Scan your system and review packages and version changes before making a decision.
+- **Review the full update plan.** Check the packages involved, including dependencies and proposed removals, before authorizing a transaction.
+- **Stay in control.** Updating requires explicit confirmation and system Polkit authentication. RWR does not silently install updates.
+- **Follow the process.** Watch the authorization and transaction status in the FBI-inspired interface.
+- **Check what happened.** After a successful update, RWR scans again. If a transaction's result is uncertain, use **Check result** before trying again.
+
+The interface has its own personality: dark panels, green highlights and an FBI authorization theme. Underneath, it uses Arch Linux's package-management mechanisms rather than pretending to update your system.
+
+## Download
+
+**Current beta:** `v0.1.0-beta`
+**Arch package:** `rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst`
+
+[**Get the beta release on GitHub**](https://github.com/runningwithrottweilers/rwr-package-intelligence/releases/tag/v0.1.0-beta)
+
+This beta is distributed as a native Arch Linux package. An older read-only AppImage is **not** part of this release.
 
 ## Install on Arch Linux
 
-Use the native Arch package and check its SHA256 against a trusted copy of the checksum. The candidate is unsigned. Follow your package signature policy.
+Download the package and its `.sha256` file from the release page into the same directory. Verify the downloaded package against a checksum obtained from a source you trust:
 
 ```sh
 sha256sum -c rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst.sha256
 ```
 
-In an administrator shell, install the local application package with `pacman -U ./rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst`. Launch **RWR Package Intelligence** from the application menu or run `/usr/bin/rwr-package-intelligence`. For a Waybar click action use `/usr/bin/rwr-package-intelligence`.
+**Important:** The beta package is unsigned. A matching SHA256 detects differences from the published checksum, but does not establish who produced the package. Follow your own package-signature and trust policy.
 
-The package declares GTK4, pacman, pacman-contrib (`checkupdates`), systemd, Polkit, curl, tar, GnuPG, GPGME and the native library dependencies in [PKGBUILD](packaging/arch/PKGBUILD). The built package requires the libalpm 16 and libgpgme 45 SONAMEs. Keep a working Polkit authentication agent in your desktop session for authorized operations.
+After reviewing the package and its source, install it in an administrator shell:
 
-## Scan and update
+```sh
+pacman -U ./rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst
+```
 
-**Scan** checks for updates using a private temporary package database. **Update** prepares a fresh plan and shows the package changes. Installing requires an explicit deployment policy, separate transaction confirmation and Polkit authorization. If the plan changes, review a fresh plan before proceeding. The supervisor owns the transaction and records its outcome. The FBI status card shows authorization progress. Enter credentials in the system Polkit dialog. After success the application rescans and keeps the outcome visible. For an unresolved session, use **Check result** to request its status before retrying.
+Launch **RWR Package Intelligence** from your application menu, or run:
 
-The package installs service definitions with execution locked by default. See the [deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md) for socket activation, optional execution policy and recovery.
+```sh
+/usr/bin/rwr-package-intelligence
+```
+
+You can use the same executable for a Waybar click action.
+
+The package depends on GTK4, pacman, pacman-contrib (`checkupdates`), systemd, Polkit and other libraries listed in [PKGBUILD](packaging/arch/PKGBUILD). This build requires the `libalpm 16` and `libgpgme 45` SONAMEs. A working Polkit authentication agent is required for authorized operations.
+
+## How updating works
+
+1. Select **Scan** to check for available updates using a private temporary package database.
+2. Select **Update** to generate a fresh plan. Review version changes, dependencies and any removals.
+3. If you choose to continue, approve the transaction separately and authenticate through your system's **Polkit dialog**.
+4. Follow the status in RWR. After success, the application scans again and keeps the transaction result visible.
+
+If the plan changes before execution, review the new plan. If a session has an unresolved outcome, select **Check result** before attempting another update.
+
+**Beta setup note:** The installed backend service definitions are locked against execution by default. Real update execution requires the deployment policy described in the [backend deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md). Installing the package alone does not guarantee that the privileged update workflow is enabled.
 
 ## Uninstall
 
-Wait for any running transaction and determine its outcome. Stop the USER and SYSTEM sockets and services as described in the deployment guide. In an administrator shell run `pacman -R rwr-package-intelligence`. Keep the transaction journals and user execution references for recovery or auditing. Remove your own Waybar and local desktop overrides separately if you created them. Removing RWR does not undo completed system updates.
+First, make sure no update transaction is running and that you know its outcome. Follow the [deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md) to stop the relevant user and system sockets and services. Then, in an administrator shell:
+
+```sh
+pacman -R rwr-package-intelligence
+```
+
+Keep transaction journals and execution records if you need them for recovery or auditing. Remove any custom Waybar or desktop overrides you added separately. **Uninstalling RWR does not undo completed system updates.**
 
 ## Build and inspect
 
-The source archive contains the production build inputs. The development checkout carries the isolated test fixtures separately. The offline builder uses `Cargo.lock`, a fixed build epoch, normalized paths and archive metadata. Reproduce with the same Rust toolchain, dependency cache, system ABI and packaging tools. The deployment guide lists the build and verification commands. The old read-only AppImage is outside this beta release.
+The release source archive contains the production build inputs; the development checkout also contains isolated test fixtures. The offline build process uses `Cargo.lock`, a fixed build epoch and normalized paths and archive metadata.
 
-## Po polsku
+To reproduce a build, you need matching Rust tools, cached dependencies, system ABI and packaging tools. See the [backend deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md) for build and verification instructions.
 
-Zainstaluj pakiet Arch zgodnie z instrukcją powyżej. **Skanuj** sprawdza dostępne aktualizacje. **Aktualizuj** pokazuje świeży plan, wersje, zależności i usunięcia. Instalacja wymaga osobnej zgody i Polkit. Po sukcesie lista odświeża się automatycznie, a wynik transakcji pozostaje widoczny. Przy nieustalonym wyniku wybierz **Sprawdź wynik** przed ponowną próbą. Odinstalowanie RWR nie cofa zmian pakietów systemowych.
+## About RUNNING WITH ROTTWEILERS
+
+RWR Package Intelligence is a project by **RUNNING WITH ROTTWEILERS**: Linux software with a distinct visual identity and a focus on giving users clear choices over what happens on their machines.
+
+[RUNNING WITH ROTTWEILERS website](https://runningwithrottweilers.github.io/) · [GitHub](https://github.com/runningwithrottweilers)
 
 ## Licenses
 
-Source code is distributed under the [MIT License](LICENSE). Artwork and branding are covered separately in [ASSETS-LICENSE.md](ASSETS-LICENSE.md). Third-party dependencies retain their own licenses.
+The source code is released under the [MIT License](LICENSE). Artwork and branding are covered separately in [ASSETS-LICENSE.md](ASSETS-LICENSE.md). Third-party components retain their own licenses.
