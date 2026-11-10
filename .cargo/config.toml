@@ -1,0 +1,6 @@
+# Processes started by cargo (cargo test, cargo run) are isolated from the
+# production host: REAL locked, no system socket, helper or Polkit, private
+# state directory. Deny-only; see src/test_isolation.rs. Installed binaries
+# started by systemd or the desktop never see this variable.
+[env]
+RWR_TEST_ISOLATION = "1"

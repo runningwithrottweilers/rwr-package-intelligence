@@ -1,0 +1,14 @@
+# SYSTEM socket template. NOT installed/activated. No authorization by socket UID.
+[Unit]
+Description=RWR privileged transaction endpoint (execution locked)
+
+[Socket]
+ListenStream=/run/rwr-package-intelligence/system.sock
+SocketUser=root
+SocketGroup=root
+SocketMode=0666
+DirectoryMode=0755
+RemoveOnStop=yes
+Service=rwr-package-intelligence-system.service
+# Connect permission is not COMMIT authority. Each connection requires Polkit.
+# Deliberately no Install section.

@@ -1,0 +1,32 @@
+# SYSTEM service template. NOT installed/activated. REAL MODE remains false.
+# Separate from the existing read-only USER supervisor. Requires VM validation.
+[Unit]
+Description=RWR privileged transaction supervisor (execution locked)
+Requires=rwr-package-intelligence-system.socket
+After=rwr-package-intelligence-system.socket polkit.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/lib/rwr-package-intelligence/rwr-transaction-supervisor --serve-system
+Sockets=rwr-package-intelligence-system.socket
+NoNewPrivileges=yes
+UMask=0077
+RuntimeDirectory=rwr-package-intelligence
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+StateDirectory=rwr-package-intelligence
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+# Only the broker receives stop signals. A helper already in COMMIT owns its
+# execution lease and durable journal; it must not die with its broker/GUI.
+# This lifecycle contract MUST be tested with real systemd in a separate VM.
+KillMode=process
+KillSignal=SIGTERM
+SendSIGKILL=no
+TimeoutStopSec=infinity
+# Deliberately no Install section. Never enable this template on the host.

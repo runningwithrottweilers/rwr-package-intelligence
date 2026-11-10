@@ -1,0 +1,5 @@
+/target/
+/dist/
+*.pkg.tar.*
+*.AppImage
+/packaging/arch/*-backend*.tar.gz

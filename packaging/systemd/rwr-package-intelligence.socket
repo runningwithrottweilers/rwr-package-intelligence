@@ -1,0 +1,13 @@
+# Diagnostic USER socket template. Do not install as a system/root unit.
+[Unit]
+Description=RWR diagnostic supervisor socket
+
+[Socket]
+ListenStream=%t/rwr-package-intelligence/supervisor.sock
+SocketMode=0600
+DirectoryMode=0700
+Accept=no
+RemoveOnStop=yes
+Service=rwr-package-intelligence.service
+# No Install section: deliberate opt-in only. Socket survives service idle exit;
+# GUI reconnect activates a fresh supervisor. GUI disconnection does not stop it.

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RWR PACKAGE INTELLIGENCE
+Comment=Arch Linux update intelligence center
+Comment[pl]=Centrum analizy aktualizacji Arch Linux
+Exec=/usr/bin/rwr-package-intelligence
+Icon=io.github.runningwithrottweilers.PackageIntelligence
+Terminal=false
+Categories=System;
+Keywords=Arch;Linux;Updates;RWR;
+StartupNotify=true

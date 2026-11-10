@@ -1,0 +1,349 @@
+window, .rwr-window, .root, .package-scroll, .package-scroll viewport, .package-scroll undershoot {
+    background: #0c1110;
+    background-color: #0c1110;
+    color: #eef4ef;
+}
+.header { background: #151a18; padding: 18px 24px; border-bottom: 2px solid #8f2029; }
+.app-title { color: #f6f6f4; font-size: 24px; font-weight: 800; }
+.subtitle { color: #9cb4a3; font-size: 12px; }
+.controls { background: #111b16; padding: 16px 24px; }
+.status { color: #a1efb5; font-size: 18px; font-weight: 700; }
+.scan-button { background: #215b38; color: #fff; border: 1px solid #3d9c60; border-radius: 8px; padding: 10px 16px; font-weight: 700; }
+.package-list { background: #0c1110; padding: 14px 20px 20px; }
+.package-row { background: #1a2620; border: 1px solid #365342; border-radius: 10px; padding: 16px; }
+.package-title { color: #fff; font-size: 18px; font-weight: 800; }
+.package-version { color: #8eecab; font-size: 14px; }
+.package-description { color: #e1eae3; font-size: 14px; }
+.package-note { color: #b5bcb6; font-size: 12px; }
+.footer { background: #151a18; color: #9db3a3; padding: 12px; font-size: 11px; }
+
+
+/* RWR UFO banner and language switch */
+.rwr-banner { background-color: #080f11; margin: 0; padding: 0; }
+.language-button { background: #14271c; color: #b7f9c9; border: 1px solid #3d9c60; border-radius: 8px; padding: 8px 12px; font-weight: 700; }
+
+.rwr-motto { background: #101b15; color: #8ef0a8; font-size: 12px; font-weight: 700; letter-spacing: 4px; padding: 8px; }
+
+
+/* RWR opaque application surfaces */
+window.background,
+window.rwr-window,
+window.rwr-window > box.root,
+.root,
+.package-scroll,
+.package-scroll > viewport,
+.package-list {
+    background-color: #0c1110;
+    background-image: none;
+    opacity: 1;
+}
+
+.rwr-install-button {
+    background: #145c2d;
+    color: #ffffff;
+    border: 2px solid #39e879;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 15px;
+    min-height: 42px;
+    margin: 6px 12px;
+}
+
+.rwr-install-button:disabled {
+    background: #193524;
+    color: #a8c9b1;
+    border-color: #426e50;
+    opacity: 1;
+}
+
+
+/* RWR ETAP 11I — uporzadkowany panel sterowania */
+.controls {
+    background-color: #111b16;
+    padding: 12px 20px 14px;
+}
+
+.status {
+    color: #a1efb5;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.language-button {
+    min-height: 32px;
+    min-width: 58px;
+    padding: 3px 10px;
+    margin: 0;
+}
+
+.scan-button,
+.rwr-install-button {
+    min-height: 42px;
+    padding: 7px 12px;
+    margin: 0;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.scan-button {
+    background-color: #215b38;
+    color: #ffffff;
+    border: 1px solid #3d9c60;
+}
+
+.rwr-install-button {
+    background-color: #145c2d;
+    color: #ffffff;
+    border: 1px solid #39e879;
+}
+
+.rwr-install-button:disabled {
+    background-color: #193524;
+    color: #a8c9b1;
+    border-color: #426e50;
+    opacity: 1;
+}
+
+
+/* RWR ETAP 12B — dolny panel X-FILES */
+.bottom-actions {
+    background-color: #111b16;
+    border-top: 1px solid #365342;
+    padding: 12px 20px;
+}
+
+
+
+
+
+.bottom-actions .scan-button,
+.bottom-actions .rwr-install-button {
+    min-height: 42px;
+    margin: 0;
+    padding: 8px 12px;
+}
+
+/* RWR ETAP 13 — compact command bar and readable intelligence cards */
+.controls { padding: 9px 16px; }
+.status { font-size: 15px; }
+.language-button { min-height: 28px; padding: 2px 9px; }
+.package-list { padding: 10px 14px 12px; }
+.package-row { padding: 11px 13px; border-radius: 8px; }
+.package-title { font-size: 16px; }
+.package-version { font-size: 12px; }
+.package-description { font-size: 12px; color: #d1dfd5; }
+.package-note { font-size: 11px; color: #c7b47d; }
+.bottom-actions { padding: 8px 14px 9px; }
+.test-mode-label { color: #b7a66d; font-size: 10px; }
+.bottom-actions .scan-button,
+.bottom-actions .rwr-install-button {
+    min-height: 32px;
+    padding: 5px 7px;
+    margin: 0;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+
+/* RWR ETAP 14B — refined compact intelligence cards */
+.package-list {
+    padding: 8px 14px 12px;
+}
+.package-row {
+    background-color: #17251d;
+    border: 1px solid #31503c;
+    border-radius: 8px;
+    padding: 9px 12px;
+}
+.package-row:hover {
+    background-color: #1c3024;
+    border-color: #46815a;
+}
+.package-title {
+    color: #f0f8f1;
+    font-size: 15px;
+    font-weight: 800;
+}
+.package-version {
+    color: #87e9a4;
+    font-size: 12px;
+    font-weight: 700;
+}
+.package-description {
+    color: #c6d9cb;
+    font-size: 12px;
+}
+.package-note {
+    color: #d0b77b;
+    font-size: 11px;
+}
+.controls {
+    padding: 7px 14px;
+}
+.bottom-actions {
+    padding: 7px 14px 8px;
+}
+.bottom-actions .scan-button,
+.bottom-actions .rwr-install-button {
+    min-height: 30px;
+    padding: 4px 7px;
+}
+.footer {
+    padding: 7px 10px;
+    font-size: 10px;
+}
+
+/* RWR ETAP 15D — package classification, informational only */
+.package-category {
+    color: #a6dcbc;
+    background-color: #203c2b;
+    border: 1px solid #3a694c;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.package-attention {
+    color: #f0d7a2;
+    background-color: #42321b;
+    border: 1px solid #937443;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+
+/* RWR ETAP 6C-1 — package readability */
+.package-row {
+    background-color: #17271e;
+    border: 1px solid #3b6549;
+    border-radius: 9px;
+    padding: 12px 14px;
+}
+.package-row:hover {
+    background-color: #203629;
+    border-color: #69b783;
+}
+.package-title {
+    color: #f4fff6;
+    font-size: 17px;
+    font-weight: 800;
+}
+.package-version {
+    color: #91f5ae;
+    font-size: 13px;
+    font-weight: 700;
+}
+.package-description {
+    color: #dcebe0;
+    font-size: 13px;
+}
+.package-note {
+    color: #ead09a;
+    font-size: 12px;
+}
+
+
+/* RWR ETAP 6D-3 — read-only system information */
+.system-info-panel {
+    background-color: #14251b;
+    border: 1px solid #3b7650;
+    border-radius: 10px;
+    padding: 18px;
+}
+.system-info-title {
+    color: #9cf5b5;
+    font-size: 16px;
+    font-weight: 800;
+}
+.system-info-line {
+    color: #dcebe0;
+    font-size: 13px;
+}
+
+/* RWR ETAP 4.13 — confirmed update signals (Security Tracker / verified source) */
+.package-security {
+    color: #ffd6d0;
+    background-color: #4a1f1b;
+    border: 1px solid #b0503f;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.package-review {
+    color: #d8dcff;
+    background-color: #262a4a;
+    border: 1px solid #5a63a8;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+
+/* RWR UFO — X-FILES abduction scene (scan strip and central transaction view) */
+.ufo-scene {
+    background-color: #030604;
+    border: 1px solid rgba(57, 232, 121, 0.45);
+    border-radius: 10px;
+    box-shadow: 0 0 18px rgba(57, 232, 121, 0.18) inset;
+}
+.ufo-strip { margin: 4px 20px 8px; }
+.ufo-stage { margin: 10px 20px 14px; min-height: 280px; }
+
+/* Approved MULDER list layout; values and warnings come from live scan evidence. */
+.package-list { background-color: #050806; padding: 10px 18px 16px; }
+.package-row {
+    background-color: #0f1a14; border: 1px solid #1f3a2a;
+    border-left: 4px solid #426552; border-radius: 10px; padding: 11px 14px;
+}
+.package-row:hover { background-color: #132219; }
+.package-row.priority-security { border-left-color: #ff6262; }
+.package-row.priority-review { border-left-color: #ffb833; }
+.package-row.priority-routine { border-left-color: #39e879; }
+.package-title { font-family: monospace; font-size: 16px; font-weight: 800; }
+.priority-chip { font-family: monospace; font-size: 10px; font-weight: 800; border: 1px solid #426552; border-radius: 5px; padding: 3px 7px; color: #a6b9ad; }
+.priority-security .priority-chip { color: #ff8686; border-color: #a14242; }
+.priority-review .priority-chip { color: #ffcf70; border-color: #96733a; }
+.priority-routine .priority-chip { color: #8ef0a8; }
+.package-version { margin-top: 3px; margin-bottom: 4px; }
+.version-caption { color: #93ab9b; font-family: monospace; font-size: 10px; font-weight: 700; }
+.version-old { color: #c9a3a3; font-family: monospace; font-size: 13px; }
+.version-new { color: #d6ffe2; font-family: monospace; font-size: 13px; font-weight: 700; }
+.package-description { color: #cfe0d4; font-size: 12px; }
+.package-details { color: #81dca0; font-size: 11px; margin-top: 4px; }
+.summary-card { background-color: #0f1a14; border: 1px solid #1f3a2a; border-radius: 10px; padding: 10px 8px; }
+.summary-value { color: #e6f3ea; font-family: monospace; font-size: 24px; font-weight: 800; }
+.summary-caption { color: #93ab9b; font-family: monospace; font-size: 10px; font-weight: 700; }
+.stat-security .summary-value { color: #ff8686; }
+.stat-review .summary-value { color: #ffcf70; }
+.evidence-alert { color: #ffcf70; background-color: #211c10; border: 1px solid #96733a; border-radius: 8px; padding: 10px 12px; }
+.list-heading { color: #93ab9b; font-family: monospace; font-size: 10px; margin-top: 5px; margin-bottom: 4px; }
+.transaction-result { background-color: #0f1a14; border: 1px solid #426552; border-radius: 12px; padding: 18px 20px; }
+.result-title { font-family: monospace; font-size: 20px; font-weight: 800; }
+.result-success { border-color: #39e879; }
+.result-success .result-title { color: #8ef0a8; }
+.result-failed { border-color: #ff6262; }
+.result-failed .result-title { color: #ff8686; }
+.result-unknown { border-color: #ffb833; }
+.result-unknown .result-title { color: #ffcf70; }
+
+/* FBI ACCESS AUTHORIZATION — status of the system Polkit dialog (no input). */
+.fbi-card { margin: 8px 20px 4px; padding: 14px 18px; border: 1px solid #1f3a3f; border-left: 4px solid #f2c14e; background-image: linear-gradient(180deg, #0f2024, #0a1517); }
+.fbi-card.fbi-granted { border-left-color: #8ef0a8; }
+.fbi-card.fbi-denied { border-left-color: #ff5d5d; }
+.fbi-seal { font-family: monospace; font-size: 12px; font-weight: 700; letter-spacing: 3px; color: #7fa39a; }
+.fbi-case { font-family: monospace; font-size: 11px; color: #7fa39a; }
+.fbi-status { font-family: monospace; font-size: 26px; font-weight: 800; letter-spacing: 5px; color: #f2c14e; margin-top: 6px; }
+.fbi-granted .fbi-status { color: #8ef0a8; }
+.fbi-denied .fbi-status { color: #ff5d5d; }
+.fbi-detail { color: #d7efe6; }
+.fbi-step { font-family: monospace; font-size: 11px; padding: 3px 9px; border: 1px solid #1f3a3f; color: #7fa39a; }
+.fbi-step-now { color: #f2c14e; border-color: #f2c14e; }
+.fbi-step-ok { color: #8ef0a8; border-color: #8ef0a8; }
+.fbi-step-no { color: #ff5d5d; border-color: #ff5d5d; }
+.fbi-note { font-size: 11px; color: #7fa39a; }

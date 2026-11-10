@@ -1,0 +1,37 @@
+# Read-only USER supervisor unit template. Prepared only; no installation/activation performed.
+# Expected executable must be provisioned separately. No helper starts by default.
+# GUI socket override: RWR_DIAGNOSTIC_SUPERVISOR_SOCKET=$XDG_RUNTIME_DIR/rwr-package-intelligence/supervisor.sock
+[Unit]
+Description=RWR diagnostic supervisor (REAL MODE disabled)
+Requires=rwr-package-intelligence.socket
+After=rwr-package-intelligence.socket
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/rwr-package-intelligence/rwr-transaction-supervisor
+Sockets=rwr-package-intelligence.socket
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t/rwr-package-intelligence
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+# Explicit GUI requests may revalidate plans as this unprivileged user.
+# This does not enable execution, diagnostic control or any Polkit elevation.
+Environment=RWR_PLAN_VALIDATION_ENABLED=1
+Environment=RWR_PLAN_VALIDATION_DIRECTORY=%t/rwr-package-intelligence
+# AF_INET/AF_INET6 are required only to refresh private repository metadata.
+# The installed validation helper must be root-owned at the fixed policy path.
+# A diagnostic drop-in must supply a unique state path in the runtime directory.
+# Finished state is reloaded; unfinished state is refused without replaying work.
+# No Install section: deliberate opt-in only. Do not add system-wide/root activation.

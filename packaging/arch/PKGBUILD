@@ -1,0 +1,71 @@
+# Maintainer: RUNNING WITH ROTTWEILERS
+# Public beta candidate for Arch Linux
+
+pkgname=rwr-package-intelligence
+pkgver=0.1.0
+pkgrel=17
+pkgdesc="Arch Linux update planning and supervised installation"
+arch=(x86_64)
+url="https://github.com/runningwithrottweilers"
+license=("MIT")
+depends=("glibc" "gcc-libs" "gtk4" "pacman" "pacman-contrib"
+         "polkit" "systemd" "gpgme" "gnupg" "libseccomp" "libalpm.so=16-64" "libgpgme.so=45-64"
+         "glib2" "cairo" "gdk-pixbuf2" "curl" "tar")
+makedepends=("rust" "pkgconf")
+options=(!debug)
+# Generate the pinned local snapshot with backend-package.py prepare.
+_srcname="${pkgname}-${pkgver}"
+source=("${_srcname}-backend${pkgrel}.tar.gz")
+sha256sums=("0e8b144c051363cc756dbf209e56f54b177d569f4bfeafc02e721626ac1209a3")
+
+prepare() {
+    cd "$srcdir/$_srcname"
+    # Only for makepkg in a clean chroot. backend-package.py never calls prepare();
+    # it uses the populated local Cargo cache and stays offline.
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$srcdir/$_srcname"
+    export RWR_BUILD_SOURCE="$srcdir"
+    export RWR_BUILD_TARGET="${CARGO_TARGET_DIR:-$PWD/target}"
+    export RUSTC_WRAPPER="$PWD/packaging/arch/release-rustc.sh"
+    cargo build --release --locked --offline \
+        --bin rwr-package-intelligence --bin rwr-update-helper \
+        --bin rwr-transaction-supervisor
+}
+
+package() {
+
+    cd "$srcdir/$_srcname"
+    # Privileged helper gated by administrator policy and Polkit.
+    install -Dm755 target/release/rwr-update-helper "$pkgdir/usr/lib/rwr-package-intelligence/rwr-update-helper"
+    install -Dm755 target/release/rwr-transaction-supervisor "$pkgdir/usr/lib/rwr-package-intelligence/rwr-transaction-supervisor"
+
+    # Files only: no install script, presets, enable/start or privilege changes.
+    for unit in service socket; do
+        install -Dm644 "packaging/systemd/rwr-package-intelligence-system.$unit" \
+            "$pkgdir/usr/lib/systemd/system/rwr-package-intelligence-system.$unit"
+        install -Dm644 "packaging/systemd/rwr-package-intelligence.$unit" \
+            "$pkgdir/usr/lib/systemd/user/rwr-package-intelligence.$unit"
+    done
+
+    # Dedicated Polkit action for the installed helper.
+    install -Dm644 packaging/polkit/io.github.runningwithrottweilers.rwr-package-intelligence.policy "$pkgdir/usr/share/polkit-1/actions/io.github.runningwithrottweilers.rwr-package-intelligence.policy"
+
+    install -Dm755 target/release/rwr-package-intelligence         "$pkgdir/usr/bin/rwr-package-intelligence"
+
+    install -Dm644 packaging/arch/io.github.runningwithrottweilers.PackageIntelligence.desktop         "$pkgdir/usr/share/applications/io.github.runningwithrottweilers.PackageIntelligence.desktop"
+
+    for size in 48 64 128 256; do
+        install -Dm644 "assets/icons/rwr-package-intelligence-${size}.png"             "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/io.github.runningwithrottweilers.PackageIntelligence.png"
+    done
+
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/rwr-package-intelligence/LICENSE"
+    install -Dm644 ASSETS-LICENSE.md "$pkgdir/usr/share/licenses/rwr-package-intelligence/ASSETS-LICENSE.md"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/rwr-package-intelligence/README.md"
+    install -Dm644 packaging/arch/BACKEND-DEPLOYMENT.md \
+        "$pkgdir/usr/share/doc/rwr-package-intelligence/BACKEND-DEPLOYMENT.md"
+
+}
