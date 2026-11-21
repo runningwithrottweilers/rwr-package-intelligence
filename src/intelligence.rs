@@ -324,6 +324,16 @@ pub const INFO_ENTRIES: &[InfoEntry] = &[
 ];
 
 pub fn explain(name: &str, language: Language) -> Option<PackageInfo> {
+    if crate::classification::is_cachyos_kernel(name) {
+        let (purpose, impact) = match language {
+            Language::Polish => ("Jądro Linux w wariancie CachyOS.", KERNEL_PL),
+            Language::English => ("A CachyOS variant of the Linux kernel.", KERNEL_EN),
+        };
+        return Some(PackageInfo {
+            purpose: purpose.to_string(),
+            impact: impact.to_string(),
+        });
+    }
     let entry = INFO_ENTRIES.iter().find(|entry| entry.name == name)?;
     let (purpose, impact) = match language {
         Language::Polish => (entry.pl_purpose, entry.pl_impact),
@@ -338,6 +348,19 @@ pub fn explain(name: &str, language: Language) -> Option<PackageInfo> {
 #[cfg(test)]
 mod data_quality_tests {
     use super::*;
+
+    #[test]
+    fn cachyos_kernel_descriptions_keep_arch_reboot_guidance_in_both_languages() {
+        for name in include_str!("../tests/fixtures/cachyos/kernels.txt").lines() {
+            for language in [Language::Polish, Language::English] {
+                let info = explain(name, language).unwrap();
+                assert!(info.purpose.contains("CachyOS"), "{name}");
+                assert_eq!(info.impact, explain("linux", language).unwrap().impact);
+            }
+        }
+        assert!(explain("linux-cachyos-nvidia", Language::English).is_none());
+        assert!(explain("linux-cachyos-headers", Language::Polish).is_none());
+    }
 
     #[test]
     fn entries_are_unique_complete_and_bilingual() {

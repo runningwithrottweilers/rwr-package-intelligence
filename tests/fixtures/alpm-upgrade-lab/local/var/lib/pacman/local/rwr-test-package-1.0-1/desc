@@ -1,0 +1,29 @@
+%NAME%
+rwr-test-package
+
+%VERSION%
+1.0-1
+
+%DESC%
+RWR isolated libalpm test package
+
+%ARCH%
+any
+
+%BUILDDATE%
+1794063515
+
+%PACKAGER%
+Unknown Packager
+
+%SIZE%
+6
+
+%LICENSE%
+MIT
+
+%REASON%
+0
+
+%VALIDATION%
+none

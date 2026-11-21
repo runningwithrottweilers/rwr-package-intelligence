@@ -1,95 +1,104 @@
-# RWR Package Intelligence
+# RWR PACKAGE INTELLIGENCE
 
-**Know what's changing. Update Arch Linux with confidence.**
+A Rust and GTK4 update manager for Arch Linux package repositories. Review available updates and an ALPM transaction plan before authorizing a system upgrade through a separate privileged backend.
 
-Arch Linux moves fast. Keeping up with updates shouldn't mean guessing what will change on your system.
+**Version: 0.1.0-19 BETA** · [GitHub pre-release v0.1.0-19-beta](https://github.com/runningwithrottweilers/rwr-package-intelligence/releases/tag/v0.1.0-19-beta).
 
-**RWR Package Intelligence** brings package updates into a dark, X-Files-inspired desktop interface. See what's available, review the proposed changes, and decide when to proceed. It's a real Arch Linux updater, not just an update notification or a read-only demo.
+## Scope
 
-Built by **RUNNING WITH ROTTWEILERS** for Arch Linux x86_64, with an interface available in English and Polish.
+The application reads pacman repositories and prepares system upgrades through libalpm. REAL MODE uses a system supervisor, a transaction helper and Polkit authorization. AUR and Flatpak are not supported.
 
-## What you can do
+The current package has been tested on one HP CachyOS installation. This does not establish compatibility with every Arch derivative. The release was prepared on Dell Arch Linux; the HP results below were reported by the project owner, not reproduced on the Dell.
 
-- **See available updates.** Scan your system and review packages and version changes before making a decision.
-- **Review the full update plan.** Check the packages involved, including dependencies and proposed removals, before authorizing a transaction.
-- **Stay in control.** Updating requires explicit confirmation and system Polkit authentication. RWR does not silently install updates.
-- **Follow the process.** Watch the authorization and transaction status in the FBI-inspired interface.
-- **Check what happened.** After a successful update, RWR scans again. If a transaction's result is uncertain, use **Check result** before trying again.
+## Requirements
 
-The interface has its own personality: dark panels, green highlights and an FBI authorization theme. Underneath, it uses Arch Linux's package-management mechanisms rather than pretending to update your system.
+- Linux x86_64 with pacman and **libalpm 16.0.1**, with `libalpm.so=16-64`.
+- `libgpgme.so=45-64`, GTK4, glibc, gcc-libs, glib2, cairo and gdk-pixbuf2.
+- pacman-contrib, Polkit, systemd, gpgme, gnupg and libseccomp.
+- A graphical session with a working Polkit authentication agent.
 
-## Download
+The archive declares these dependencies; pacman is responsible for checking them. Do not bypass dependency or signature checks. Hyprland is not required by the package.
 
-**Current beta:** `v0.1.0-beta`
-**Arch package:** `rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst`
+## Safety
 
-[**Get the beta release on GitHub**](https://github.com/runningwithrottweilers/rwr-package-intelligence/releases/tag/v0.1.0-beta)
+Read the installation instructions and limitations below before installing. This is a beta that can change system packages. Have an independent backup and a recovery method available.
 
-This beta is distributed as a native Arch Linux package. An older read-only AppImage is **not** part of this release.
+REAL MODE is locked until explicitly enabled by an administrator. Enabling it does not perform an update. Each transaction requires review and authorization through Polkit; enter credentials only in the system authentication dialog. The application’s authorization screen is not a password prompt.
 
-## Install on Arch Linux
+CheckSpace passes the configured pacman disk-space check to libalpm. It is not a filesystem snapshot, a backup or a guarantee that an update will succeed. The application does not provide rollback of completed package upgrades.
 
-Download the package and its `.sha256` file from the release page into the same directory. Verify the downloaded package against a checksum obtained from a source you trust:
+## Validation and limitations
 
-```sh
-sha256sum -c rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst.sha256
-```
+On HP CachyOS, the owner confirmed installation, REAL MODE readiness, working supervisor and sockets, active CheckSpace, four CachyOS database signatures reporting GOODSIG, and seven repositories read without errors. The GUI scan found **0 updates and 1,528 packages**; ALPM plan preparation succeeded.
 
-**Important:** The beta package is unsigned. A matching SHA256 detects differences from the published checksum, but does not establish who produced the package. Follow your own package-signature and trust policy.
+A full upgrade succeeded with 0.1.0-18. No updates were available to exercise the full upgrade path in 0.1.0-19. Five earlier GUI tests remain failing. This release is not stable.
 
-After reviewing the package and its source, install it in an administrator shell:
+## Reporting a bug
 
-```sh
-pacman -U ./rwr-package-intelligence-0.1.0-17-x86_64.pkg.tar.zst
-```
+Use the project repository’s Issues page. Include the package version, distribution, pacman/libalpm versions, desktop session, steps to reproduce, expected and actual results, and relevant redacted logs. Mention whether REAL MODE was enabled and whether a transaction was running. Remove account names, local paths, credentials and private repository addresses. Never attach authentication secrets or unreviewed system journals.
 
-Launch **RWR Package Intelligence** from your application menu, or run:
+License: MIT; see the source repository’s LICENSE and ASSETS-LICENSE.md for asset terms.
 
-```sh
-/usr/bin/rwr-package-intelligence
-```
+# Installation and removal — 0.1.0-19 BETA
 
-You can use the same executable for a Waybar click action.
+**BETA pre-release.** The corrected build passed local regression and package checks. It has not been installed on HP; the HP results above belong to the previous artifact. No full upgrade was tested with this corrected build.
 
-The package depends on GTK4, pacman, pacman-contrib (`checkupdates`), systemd, Polkit and other libraries listed in [PKGBUILD](packaging/arch/PKGBUILD). This build requires the `libalpm 16` and `libgpgme 45` SONAMEs. A working Polkit authentication agent is required for authorized operations.
+## Verify the package
 
-## How updating works
-
-1. Select **Scan** to check for available updates using a private temporary package database.
-2. Select **Update** to generate a fresh plan. Review version changes, dependencies and any removals.
-3. If you choose to continue, approve the transaction separately and authenticate through your system's **Polkit dialog**.
-4. Follow the status in RWR. After success, the application scans again and keeps the transaction result visible.
-
-If the plan changes before execution, review the new plan. If a session has an unresolved outcome, select **Check result** before attempting another update.
-
-**Beta setup note:** The installed backend service definitions are locked against execution by default. Real update execution requires the deployment policy described in the [backend deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md). Installing the package alone does not guarantee that the privileged update workflow is enabled.
-
-## Uninstall
-
-First, make sure no update transaction is running and that you know its outcome. Follow the [deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md) to stop the relevant user and system sockets and services. Then, in an administrator shell:
+See the requirements above. In the directory containing the package and checksum file:
 
 ```sh
-pacman -R rwr-package-intelligence
+sha256sum -c 019-SHA256SUMS
 ```
 
-Keep transaction journals and execution records if you need them for recovery or auditing. Remove any custom Waybar or desktop overrides you added separately. **Uninstalling RWR does not undo completed system updates.**
+Do not proceed if verification fails. Check that pacman and libalpm match the required ABI and that a Polkit authentication agent is running in the graphical session. Do not bypass pacman dependency or trust checks to install this beta. The candidate is not accompanied by a detached package signature.
 
-## Build and inspect
+## Install
 
-The release source archive contains the production build inputs; the development checkout also contains isolated test fixtures. The offline build process uses `Cargo.lock`, a fixed build epoch and normalized paths and archive metadata.
+Ensure no package transaction is running; close the application before replacing an older version. To install the verified package:
 
-To reproduce a build, you need matching Rust tools, cached dependencies, system ABI and packaging tools. See the [backend deployment guide](packaging/arch/BACKEND-DEPLOYMENT.md) for build and verification instructions.
+```sh
+sudo pacman -U ./019-RWR-PACKAGE-INTELLIGENCE-0.1.0-19-x86_64.pkg.tar.zst
+rwr-package-intelligence-admin status
+```
 
-## About RUNNING WITH ROTTWEILERS
+The package includes the GUI and privileged backend. Installing it does not enable REAL MODE. Do not use an old AppImage or a separate backend package from a previous release with this candidate.
 
-**Author & Lead Developer:** Artur Maciejewski
+## Enable REAL MODE (optional)
 
-**Developed and published by:** RUNNING WITH ROTTWEILERS
+After reviewing the risks and preparing backups:
 
-RWR Package Intelligence is a project by **RUNNING WITH ROTTWEILERS**: Linux software with a distinct visual identity and a focus on giving users clear choices over what happens on their machines.
+```sh
+sudo rwr-package-intelligence-admin enable
+rwr-package-intelligence-admin status
+rwr-package-intelligence
+```
 
-[RUNNING WITH ROTTWEILERS website](https://runningwithrottweilers.github.io/) · [GitHub](https://github.com/runningwithrottweilers)
+The administrative command checks package integrity and libalpm compatibility, writes the execution policy and activates the system socket. It does not upgrade packages. Each update still needs a reviewed plan and Polkit authorization. The supervisor and helper may each request authorization.
 
-## Licenses
+The system socket is `/run/rwr-package-intelligence/system.sock`. Access to that socket alone does not authorize a transaction. A user-scoped diagnostic socket is a separate mechanism, not a substitute for REAL MODE.
 
-The source code is released under the [MIT License](LICENSE). Artwork and branding are covered separately in [ASSETS-LICENSE.md](ASSETS-LICENSE.md). Third-party components retain their own licenses.
+For an upgrade from an already enabled older backend, use the existing deployment guide to refresh an already running supervisor only after confirming there is no active or unresolved transaction. Do not restart backend processes during a transaction.
+
+## Disable and uninstall
+
+Finish or resolve any active transaction first. Then:
+
+```sh
+sudo rwr-package-intelligence-admin disable
+sudo pacman -R rwr-package-intelligence
+```
+
+The disable command refuses to interrupt an active helper transaction. Do not force it. Keep transaction state and journals for recovery; do not delete them as part of routine removal. Disabling or uninstalling the application does not undo completed system upgrades.
+
+## If something goes wrong
+
+Do not start a second transaction while the outcome of the first is unresolved. Preserve logs, inspect the existing transaction result, and use the established Arch recovery procedure when necessary. Never disable signature verification or remove pacman’s lock file merely to retry an unresolved operation.
+
+## Changes in 0.1.0-19
+
+Optional signature levels retain verification. CachyOS database signatures are refreshed with their databases. The multi-architecture fix from 0.1.0-18 is retained.
+
+## Release files
+
+[Release notes](docs/release-019/019-RELEASE-NOTES.md) · [Installation and removal](docs/release-019/019-INSTALL.md) · [Known issues](docs/release-019/019-KNOWN-ISSUES.md)

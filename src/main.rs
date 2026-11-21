@@ -32,7 +32,6 @@ mod transaction_process_test;
 use rwr_package_intelligence::transaction_protocol;
 use rwr_package_intelligence::transaction_state;
 use rwr_package_intelligence::transaction_worker;
-mod fbi_access;
 mod ufo_progress;
 mod ufo_window;
 mod ui;

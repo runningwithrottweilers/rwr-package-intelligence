@@ -1,0 +1,10 @@
+pkgname=rwr-test-package
+pkgver=1.0
+pkgrel=1
+pkgdesc="RWR isolated libalpm test package"
+arch=("any")
+license=("MIT")
+package() {
+  install -dm755 "$pkgdir/usr/share/rwr-alpm-test"
+  printf "%s\n" "$pkgver-$pkgrel" > "$pkgdir/usr/share/rwr-alpm-test/version"
+}

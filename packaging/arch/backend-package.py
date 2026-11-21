@@ -33,6 +33,7 @@ LIB = f'usr/lib/{NAME}'
 SYS = f'{NAME}-system'
 FILES = {
     f'usr/bin/{NAME}': 0o755,
+    f'usr/bin/{NAME}-admin': 0o755,
     f'{LIB}/rwr-update-helper': 0o755,
     f'{LIB}/rwr-transaction-supervisor': 0o755,
     f'usr/lib/systemd/system/{SYS}.service': 0o644,
@@ -90,15 +91,11 @@ def prepare():
     archive = ARCH / meta['source'][0]
     # Explicit source allowlist excludes PKGBUILD itself (no circular checksum),
     # old source/package archives, build output, backups and private dotfiles.
-    entries = ['Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'LICENSE',
-               'ASSETS-LICENSE.md', 'README.md', 'assets/style.css',
-               'assets/rwr-package-banner.png', 'packaging/systemd', 'packaging/polkit',
-               'packaging/arch/release-rustc.sh', 'packaging/arch/backend-package.py',
-               'packaging/arch/BACKEND-DEPLOYMENT.md',
-               'packaging/arch/io.github.runningwithrottweilers.PackageIntelligence.desktop',
-               'src/bin/rwr-transaction-supervisor.rs', 'src/bin/rwr-update-helper.rs']
-    entries += [str(p.relative_to(ROOT)) for p in (ROOT / 'src').glob('*.rs')]
-    entries += [f'assets/icons/rwr-package-intelligence-{size}.png' for size in (48, 64, 128, 256)]
+    entries = ['Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'src', 'assets', 'tests',
+               'LICENSE', 'ASSETS-LICENSE.md', 'README.md', 'packaging/systemd',
+               'packaging/polkit', 'packaging/admin', 'packaging/arch/backend-package.py',
+               'packaging/arch/BACKEND-DEPLOYMENT.md', 'packaging/arch/test_backend_package.py',
+               'packaging/arch/io.github.runningwithrottweilers.PackageIntelligence.desktop']
     with archive.open('wb') as output, gzip.GzipFile(fileobj=output, mode='wb', mtime=0, filename='') as compressed:
         with tarfile.open(fileobj=compressed, mode='w', format=tarfile.PAX_FORMAT) as tar:
             paths = set()
@@ -241,6 +238,31 @@ def check_binary_gate(stage):
     print(f'PASS binaries: policy gate in helper/supervisor/GUI, helper imports alpm_trans_commit, {detail}')
 
 
+# Administrator opt-in tool: the only supported way to open the runtime gate.
+# It must require root, refuse unsupported libalpm, write exactly the schema-1
+# policy and confirm the result through the supervisor's own trust checks.
+ADMIN_REQUIRED = [
+    '#!/bin/bash\n', 'set -euo pipefail', 'PATH=/usr/bin', 'REQUIRED_ALPM=16.0.1',
+    'require_root enable', 'require_root disable',
+    'printf \'{"schema":1,"allow_system_upgrade":%s}\\n\' "$value"',
+    'chown 0:0', 'chmod 0644', 'mv -fT', f'POLICY=$POLICY_DIR/execution-policy.json',
+    f'POLICY_DIR=/etc/$NAME', 'systemctl add-wants sockets.target "$SOCKET"',
+    '"$SUPERVISOR" --status', 'transaction_running && die',
+]
+ADMIN_FORBIDDEN = ['pkexec', 'pacman -S', 'pacman -U', 'pacman -R', '-Syu', 'db.lck', '--nodeps',
+                   '--overwrite', 'NoNewPrivileges', 'systemctl enable', 'polkit-1/rules.d', 'reboot']
+
+
+def check_admin_tool(stage):
+    text = (stage / f'usr/bin/{NAME}-admin').read_text()
+    for needle in ADMIN_REQUIRED:
+        require(needle in text, f'Admin tool safeguard missing: {needle}')
+    for forbidden in ADMIN_FORBIDDEN:
+        require(forbidden not in text, f'Admin tool must not use: {forbidden}')
+    print('PASS admin tool: root-only enable/disable, exact policy schema, libalpm pin, '
+          'supervisor-confirmed gate, no package/lock/Polkit-rule manipulation')
+
+
 def check_stage(stage, source):
     for name, mode in FILES.items():
         path = stage / name
@@ -260,6 +282,7 @@ def check_stage(stage, source):
     check_source_gate(source)
     check_payload_default_deny(stage)
     check_binary_gate(stage)
+    check_admin_tool(stage)
     service = ini(stage / f'usr/lib/systemd/system/{SYS}.service')
     socket = ini(stage / f'usr/lib/systemd/system/{SYS}.socket')
     user = ini(stage / f'usr/lib/systemd/user/{NAME}.service')
@@ -408,8 +431,7 @@ def build():
     source = work / 'src' / f'{NAME}-{meta["pkgver"][0]}'
     require(f'version = "{meta["pkgver"][0]}"' in (source / 'Cargo.toml').read_text(), 'Source version mismatch')
     target = work / 'target'
-    environment = dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_NET_OFFLINE='true',
-                       SOURCE_DATE_EPOCH=os.environ.get('SOURCE_DATE_EPOCH', '1794349181'))
+    environment = dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_NET_OFFLINE='true')
     # package() expects the normal Cargo target path in the extracted snapshot.
     (source / 'target').symlink_to(target, target_is_directory=True)
     for operation in ['build', 'package']:
@@ -417,7 +439,7 @@ def build():
         run('bash', '--noprofile', '--norc', '-c', script, '_', str(PKGBUILD), str(work / 'src'), str(work / 'pkg'), operation, env=environment)
     stage = work / 'pkg'
     check_stage(stage, source)
-    build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', '1794349181'))
+    build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', str(int(__import__('time').time()))))
     require(build_epoch >= 0, 'Invalid SOURCE_DATE_EPOCH')
     pkginfo = [f'pkgname = {NAME}', f'pkgbase = {NAME}',
                f'pkgver = {meta["pkgver"][0]}-{meta["pkgrel"][0]}',

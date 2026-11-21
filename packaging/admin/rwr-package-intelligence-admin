@@ -1,0 +1,166 @@
+#!/bin/bash
+# rwr-package-intelligence-admin — administrator opt-in for REAL MODE.
+#
+#   rwr-package-intelligence-admin status     (any user, read-only)
+#   sudo rwr-package-intelligence-admin enable
+#   sudo rwr-package-intelligence-admin disable
+#
+# The package installs default-deny. "enable" performs exactly the deployment
+# that was done by hand on the reference machine: a root-owned runtime policy
+# and the SYSTEM socket wanted by sockets.target. It grants no authority by
+# itself: every update still needs confirmation in the application and a
+# separate Polkit administrator authorization in the supervisor and the helper.
+# Nothing here updates the system, starts a transaction or touches pacman locks.
+set -euo pipefail
+umask 022
+export LC_ALL=C
+PATH=/usr/bin
+
+NAME=rwr-package-intelligence
+POLICY_DIR=/etc/$NAME
+POLICY=$POLICY_DIR/execution-policy.json
+SOCKET=$NAME-system.socket
+SERVICE=$NAME-system.service
+UNIT=/usr/lib/systemd/system/$SOCKET
+WANTS=/etc/systemd/system/sockets.target.wants/$SOCKET
+SUPERVISOR=/usr/lib/$NAME/rwr-transaction-supervisor
+HELPER=/usr/lib/$NAME/rwr-update-helper
+ACTIONS=/usr/share/polkit-1/actions/io.github.runningwithrottweilers.rwr-package-intelligence.policy
+SYSTEM_SOCKET=/run/$NAME/system.sock
+# The FFI layer is verified against this exact libalpm; other versions are refused.
+REQUIRED_ALPM=16.0.1
+
+die() { printf '%s: %s\n' "${0##*/}" "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+
+require_root() {
+    [[ $EUID -eq 0 ]] || die "this operation requires administrator rights: sudo ${0##*/} $1"
+}
+
+alpm_version() {
+    pacman -V 2>/dev/null | sed -n 's/.*libalpm v\([0-9][0-9.]*\).*/\1/p' | head -n1
+}
+
+# Same verdict as the backend: the supervisor evaluates the policy with the
+# production trust checks (ownership, mode, links, schema).
+gate_open() {
+    [[ -x $SUPERVISOR ]] || return 1
+    "$SUPERVISOR" --status 2>/dev/null | grep -q '"real_execution_enabled":true'
+}
+
+transaction_running() {
+    pgrep -f "^$HELPER( |\$)" >/dev/null 2>&1
+}
+
+trusted_dir() {  # root-owned, not a symlink, not group/other writable
+    local dir=$1 owner mode
+    [[ -d $dir && ! -L $dir ]] || return 1
+    read -r owner mode < <(stat -c '%u %a' -- "$dir")
+    [[ $owner == 0 ]] && (( (8#$mode & 8#022) == 0 ))
+}
+
+write_policy() {  # $1 = true|false; atomic replace, root:root 0644, one link
+    local value=$1 tmp
+    trusted_dir /etc || die "/etc is not a trusted root-owned directory"
+    if [[ -e $POLICY_DIR || -L $POLICY_DIR ]]; then
+        trusted_dir "$POLICY_DIR" || die "$POLICY_DIR must be a root-owned directory without group/other write and not a symlink"
+    else
+        install -d -m 0755 -o 0 -g 0 -- "$POLICY_DIR"
+    fi
+    tmp=$(mktemp -- "$POLICY_DIR/.execution-policy.XXXXXX")
+    trap 'rm -f -- "$tmp"' EXIT
+    printf '{"schema":1,"allow_system_upgrade":%s}\n' "$value" >"$tmp"
+    chown 0:0 -- "$tmp"
+    chmod 0644 -- "$tmp"
+    sync -- "$tmp"
+    mv -fT -- "$tmp" "$POLICY"
+    trap - EXIT
+}
+
+check_installation() {
+    local missing=() file
+    for file in "$SUPERVISOR" "$HELPER" "$UNIT" "$ACTIONS"; do
+        [[ -e $file ]] || missing+=("$file")
+    done
+    ((${#missing[@]} == 0)) || die "package files missing: ${missing[*]} (install $NAME first)"
+    pacman -Q "$NAME" >/dev/null 2>&1 || die "$NAME is not installed through pacman"
+    local integrity
+    integrity=$(pacman -Qkk "$NAME" 2>&1) || true
+    grep -q ' 0 altered files' <<<"$integrity" \
+        || die "installed files differ from the package (pacman -Qkk $NAME); reinstall the verified package"
+}
+
+cmd_enable() {
+    require_root enable
+    check_installation
+    local version
+    version=$(alpm_version)
+    [[ $version == "$REQUIRED_ALPM" ]] \
+        || die "libalpm ${version:-unknown} is not supported (backend validated for $REQUIRED_ALPM). REAL MODE stays locked."
+    write_policy true
+    if [[ ! -L $WANTS ]]; then
+        systemctl add-wants sockets.target "$SOCKET"
+    fi
+    systemctl start "$SOCKET"
+    systemctl is-active --quiet "$SOCKET" || die "$SOCKET did not start (journalctl -u $SOCKET)"
+    gate_open || die "policy written but the backend still reports REAL MODE locked; check: ${0##*/} status"
+    say "REAL MODE enabled."
+    say "Every update still requires confirmation in RWR PACKAGE INTELLIGENCE and the administrator password (Polkit)."
+    say "To lock it again: sudo ${0##*/} disable"
+}
+
+cmd_disable() {
+    require_root disable
+    transaction_running && die "an update transaction is running; wait until it finishes, then run disable again"
+    if [[ -e $POLICY || -L $POLICY || -d $POLICY_DIR ]]; then
+        write_policy false
+    fi
+    systemctl stop "$SOCKET" "$SERVICE" 2>/dev/null || true
+    if [[ -L $WANTS && $(readlink -- "$WANTS") == "$UNIT" ]]; then
+        rm -f -- "$WANTS"
+        systemctl daemon-reload
+    fi
+    gate_open && die "backend still reports REAL MODE enabled; check: ${0##*/} status"
+    say "REAL MODE locked. Scanning and analysis keep working; installation is refused."
+}
+
+cmd_status() {
+    local ok=1 version line
+    say "RWR PACKAGE INTELLIGENCE — REAL MODE status"
+    if line=$(pacman -Q "$NAME" 2>/dev/null); then say "  package:        $line"; else say "  package:        NOT INSTALLED"; ok=0; fi
+    version=$(alpm_version)
+    if [[ $version == "$REQUIRED_ALPM" ]]; then
+        say "  libalpm:        $version (supported)"
+    else
+        say "  libalpm:        ${version:-unknown} (UNSUPPORTED, backend requires $REQUIRED_ALPM)"; ok=0
+    fi
+    if [[ -f $POLICY ]]; then
+        say "  policy:         $POLICY ($(stat -c '%U:%G %a links=%h' -- "$POLICY")) $(head -c 200 -- "$POLICY" | tr -d '\n')"
+    else
+        say "  policy:         missing (default-deny)"
+    fi
+    if gate_open; then say "  backend gate:   OPEN (supervisor accepts the policy)"; else say "  backend gate:   LOCKED"; ok=0; fi
+    if [[ -L $WANTS ]]; then say "  socket enabled: yes"; else say "  socket enabled: no"; ok=0; fi
+    if systemctl is-active --quiet "$SOCKET" 2>/dev/null; then say "  socket active:  yes"; else say "  socket active:  no"; ok=0; fi
+    [[ -S $SYSTEM_SOCKET ]] && say "  endpoint:       $SYSTEM_SOCKET" || say "  endpoint:       absent"
+    if [[ -f $ACTIONS ]]; then say "  polkit action:  installed"; else say "  polkit action:  MISSING"; ok=0; fi
+    if pgrep -u "$(id -u "${SUDO_USER:-$USER}" 2>/dev/null || echo 0)" -f 'polkit.*(agent|authentication)' >/dev/null 2>&1; then
+        say "  polkit agent:   running in the session"
+    else
+        say "  polkit agent:   not found for this user (authorization dialogs need one)"
+    fi
+    transaction_running && say "  transaction:    helper RUNNING"
+    if ((ok)); then
+        say "READY: REAL MODE enabled; each update still requires confirmation and Polkit."
+    else
+        say "LOCKED: to enable run: sudo ${0##*/} enable"
+        return 3
+    fi
+}
+
+case ${1:-} in
+    enable) cmd_enable ;;
+    disable) cmd_disable ;;
+    status) cmd_status ;;
+    *) say "usage: ${0##*/} status | enable | disable"; exit 2 ;;
+esac

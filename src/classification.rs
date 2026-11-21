@@ -23,7 +23,36 @@ pub struct Classification {
     pub attention: Attention,
 }
 
+/// Kernel packages documented by CachyOS, including compiler variants.
+/// Do not classify every `linux-cachyos-*` package as a kernel: that namespace
+/// also contains headers, debug symbols and prebuilt NVIDIA/ZFS modules.
+pub(crate) fn is_cachyos_kernel(name: &str) -> bool {
+    let base = name
+        .strip_suffix("-lto")
+        .or_else(|| name.strip_suffix("-gcc"))
+        .unwrap_or(name);
+    matches!(
+        base,
+        "linux-cachyos"
+            | "linux-cachyos-lts"
+            | "linux-cachyos-bore"
+            | "linux-cachyos-bmq"
+            | "linux-cachyos-eevdf"
+            | "linux-cachyos-deckify"
+            | "linux-cachyos-hardened"
+            | "linux-cachyos-rc"
+            | "linux-cachyos-server"
+            | "linux-cachyos-rt-bore"
+    )
+}
+
 pub fn classify(name: &str) -> Classification {
+    if is_cachyos_kernel(name) {
+        return Classification {
+            category: Category::Kernel,
+            attention: Attention::Elevated,
+        };
+    }
     let category = match name {
         "pacman" | "systemd" | "mkinitcpio" | "dracut" | "grub" | "systemd-boot" => {
             Category::System
@@ -80,6 +109,70 @@ pub fn classify(name: &str) -> Classification {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cachyos_kernel_variants_receive_arch_kernel_attention() {
+        let reference = classify("linux");
+        for name in include_str!("../tests/fixtures/cachyos/kernels.txt").lines() {
+            assert_eq!(classify(name), reference, "{name}");
+        }
+    }
+
+    #[test]
+    fn cachyos_related_packages_are_not_assumed_to_be_kernels() {
+        for name in [
+            "linux-cachyos-headers",
+            "linux-cachyos-lts-headers",
+            "linux-cachyos-hardened-lto-headers",
+            "linux-cachyos-dbg",
+            "linux-cachyos-nvidia",
+            "linux-cachyos-nvidia-open",
+            "linux-cachyos-lto-zfs",
+            "linux-cachyos-tools",
+            "linux-cachyos-unknown",
+            "linux-cachyos-lts-lto-lto",
+            "linux-cachyosfoo",
+            "linux-cachyos-",
+            "cachyos-settings",
+        ] {
+            assert!(!is_cachyos_kernel(name), "{name}");
+            assert_eq!(classify(name).category, Category::Other, "{name}");
+            assert_eq!(classify(name).attention, Attention::Normal, "{name}");
+        }
+    }
+
+    #[test]
+    fn standard_arch_kernel_and_package_classification_is_unchanged() {
+        for name in [
+            "linux",
+            "linux-lts",
+            "linux-zen",
+            "linux-hardened",
+            "linux-firmware",
+        ] {
+            assert_eq!(classify(name).category, Category::Kernel, "{name}");
+            assert_eq!(classify(name).attention, Attention::Elevated, "{name}");
+        }
+        for (name, category, attention) in [
+            ("pacman", Category::System, Attention::Elevated),
+            ("kwin", Category::Desktop, Attention::Elevated),
+            ("hyprland", Category::Desktop, Attention::Elevated),
+            ("polkit", Category::SecurityTools, Attention::Elevated),
+            ("glibc", Category::Libraries, Attention::Elevated),
+            ("mesa", Category::Drivers, Attention::Normal),
+            ("firefox", Category::Applications, Attention::Normal),
+            ("linux-api-headers", Category::Other, Attention::Normal),
+        ] {
+            assert_eq!(
+                classify(name),
+                Classification {
+                    category,
+                    attention
+                },
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn recognizes_kernel() {

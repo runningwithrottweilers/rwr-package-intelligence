@@ -19,9 +19,3 @@ Any recognizable third-party trademarks or protected material remain subject to 
 
 ## Contributions
 Contributors must have the necessary rights and permissions for submitted artwork.
-
-## Beta distribution
-The Arch beta includes the RWR banner and application icons. The MIT license in
-`LICENSE` covers the application source. This artwork notice applies to the
-bundled graphics and reserved branding. Separate use of the branding requires
-permission from its owner.

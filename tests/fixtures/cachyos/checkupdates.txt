@@ -1,0 +1,4 @@
+linux-cachyos 6.18.1-1 -> 6.18.2-1
+linux-cachyos-lts 6.12.60-1 -> 6.12.61-1
+linux-cachyos-hardened-lto 6.18.1-1 -> 6.18.2-1
+zlib 1:1.3.2-4 -> 1:1.4-1

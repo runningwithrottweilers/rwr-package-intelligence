@@ -1,0 +1,27 @@
+[options]
+Architecture = auto
+SigLevel = Required DatabaseOptional
+IgnorePkg = linux-cachyos-lts
+NoUpgrade = etc/pacman.conf
+
+[cachyos-@TIER@]
+Include = @MIRRORS@/cachyos-mirrorlist.in
+
+[cachyos-core-@TIER@]
+Include = @MIRRORS@/cachyos-mirrorlist.in
+
+[cachyos-extra-@TIER@]
+SigLevel = Required DatabaseRequired
+Include = @MIRRORS@/cachyos-mirrorlist.in
+
+[cachyos]
+Server = https://base.example.invalid/repo/$arch/$repo
+
+[core]
+Include = @MIRRORS@/arch-mirrorlist.in
+
+[extra]
+Include = @MIRRORS@/arch-mirrorlist.in
+
+[multilib]
+Include = @MIRRORS@/arch-mirrorlist.in

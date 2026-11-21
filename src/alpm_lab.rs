@@ -493,6 +493,210 @@ mod tests {
     use super::*;
 
     #[test]
+    fn strict_signature_database_update_refuses_unsigned_fixture() {
+        use crate::libalpm_ffi::AlpmHandle;
+
+        let lab = AlpmLab::create().unwrap();
+        let handle = AlpmHandle::new_isolated_lab(&lab).unwrap();
+        handle.set_lab_architecture().unwrap();
+        handle.configure_lab_options(&lab).unwrap();
+
+        // Same fixture repository, but with mandatory package and database
+        // signature enforcement. The fixture is unsigned, so libalpm must
+        // refuse the synchronisation; the laboratory dbpath is never the
+        // host database, so the refusal is host-safe.
+        let db = handle
+            .register_fixed_lab_repository_strict(&lab.repository())
+            .unwrap();
+
+        let error = handle.update_database(db, true).unwrap_err();
+
+        // The fixture ships no rwr-test.db.sig, so the enforcement fails
+        // while retrieving the signature (download library error, 52) or at
+        // signature verification (17/43/44). Any refusal is acceptable; a
+        // silent success of an unsigned database would be a real bug.
+        assert!(
+            error.contains("failed (17)")
+                || error.contains("failed (43)")
+                || error.contains("failed (44)")
+                || error.contains("failed (52)"),
+            "Unsigned fixture must be refused, got: {error}"
+        );
+
+        // The pre-seeded laboratory database is untouched by the refusal.
+        assert!(lab.db().join("sync/rwr-test.db").is_file());
+    }
+
+    #[test]
+    fn non_strict_database_update_synchronizes_laboratory_db() {
+        use crate::libalpm_ffi::AlpmHandle;
+
+        let lab = AlpmLab::create().unwrap();
+        let handle = AlpmHandle::new_isolated_lab(&lab).unwrap();
+        handle.set_lab_architecture().unwrap();
+        handle.configure_lab_options(&lab).unwrap();
+
+        let db = handle
+            .register_fixed_lab_repository(&lab.repository())
+            .unwrap();
+
+        let sync_target = lab.db().join("sync/rwr-test.db");
+        let before = fs::metadata(&sync_target).unwrap().modified().unwrap();
+
+        handle.update_database(db, true).unwrap();
+
+        let after = fs::metadata(&sync_target).unwrap().modified().unwrap();
+        assert_ne!(
+            before, after,
+            "forced synchronisation must replace the laboratory database file"
+        );
+    }
+
+    /// Database signature state of the laboratory repository before a sync.
+    #[derive(Clone, Copy, PartialEq)]
+    enum DatabaseSignature {
+        /// Detached signature of the current rwr-test.db (CachyOS mirrors).
+        Valid,
+        /// Valid signature by the trusted key over *older* content: the HP
+        /// 0.1.0-18 incident (new .db beside a stale .sig) => BADSIG.
+        Stale,
+        /// No rwr-test.db.sig at all (Arch core/extra/multilib).
+        Absent,
+    }
+
+    /// Ephemeral signing key trusted by the laboratory keyring only (the same
+    /// arrangement as `run_signed_transaction_case`), then the repository
+    /// database signature is prepared for `state`. No host keyring is used.
+    fn prepare_lab_database_signature(lab: &AlpmLab, state: DatabaseSignature) {
+        use std::process::Command;
+        let signer = lab.base.join("signer-db-siglevel");
+        fs::DirBuilder::new().mode(0o700).create(&signer).unwrap();
+        let gpg = |args: &[&str]| {
+            let output = Command::new("/usr/bin/gpg")
+                .arg("--homedir")
+                .arg(&signer)
+                .args(["--batch", "--yes", "--pinentry-mode", "loopback", "--passphrase", ""])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        gpg(&["--quick-generate-key", "RWR ephemeral lab <lab@invalid>", "ed25519", "sign", "0"]);
+        for name in ["pubring.kbx", "pubring.gpg", "trustdb.gpg"] {
+            let source = signer.join(name);
+            if source.is_file() {
+                fs::copy(source, lab.base.join("gnupg").join(name)).unwrap();
+            }
+        }
+        let repository = lab.repository();
+        let database = repository.join("rwr-test.db");
+        let signature = repository.join("rwr-test.db.sig");
+        match state {
+            DatabaseSignature::Valid => gpg(&[
+                "--detach-sign",
+                "--output",
+                signature.to_str().unwrap(),
+                database.to_str().unwrap(),
+            ]),
+            DatabaseSignature::Stale => {
+                let previous = lab.base.join("previous-rwr-test.db");
+                fs::write(&previous, b"previous repository database content").unwrap();
+                gpg(&[
+                    "--detach-sign",
+                    "--output",
+                    signature.to_str().unwrap(),
+                    previous.to_str().unwrap(),
+                ]);
+            }
+            DatabaseSignature::Absent => assert!(!signature.exists()),
+        }
+        let _ = Command::new("/usr/bin/gpgconf")
+            .arg("--homedir")
+            .arg(&signer)
+            .args(["--kill", "all"])
+            .status();
+    }
+
+    /// Real libalpm 16 synchronisation over file:// with the exact SigLevel
+    /// of HP (CachyOS) and Dell (Arch): `Required DatabaseOptional`, as
+    /// expanded by pacman-conf and mapped by production `signature_level`.
+    fn sync_with_database_optional(state: DatabaseSignature) -> (AlpmLab, Result<(), String>) {
+        use crate::libalpm_ffi::AlpmHandle;
+        let lab = AlpmLab::create().unwrap();
+        prepare_lab_database_signature(&lab, state);
+        let result = {
+            let handle = AlpmHandle::new_isolated_lab(&lab).unwrap();
+            handle.set_lab_architecture().unwrap();
+            handle.configure_lab_options(&lab).unwrap();
+            let db = handle
+                .register_fixed_lab_repository_with_policy(
+                    &lab.repository(),
+                    &[
+                        "PackageRequired",
+                        "PackageTrustedOnly",
+                        "DatabaseOptional",
+                        "DatabaseTrustedOnly",
+                    ],
+                )
+                .unwrap();
+            handle.update_database(db, true)
+        };
+        (lab, result)
+    }
+
+    #[test]
+    fn database_optional_downloads_and_verifies_signed_database() {
+        // CachyOS: the signature is fetched beside the new database and checked.
+        let (lab, result) = sync_with_database_optional(DatabaseSignature::Valid);
+        result.unwrap();
+        let synced = lab.db().join("sync/rwr-test.db.sig");
+        assert!(synced.is_file(), "DatabaseOptional must fetch <repo>.db.sig");
+        assert_eq!(
+            fs::read(synced).unwrap(),
+            fs::read(lab.repository().join("rwr-test.db.sig")).unwrap()
+        );
+    }
+
+    #[test]
+    fn database_optional_refuses_stale_database_signature() {
+        // The HP incident: a signature that does not match the new database
+        // must be rejected, never left beside it.
+        let (_lab, result) = sync_with_database_optional(DatabaseSignature::Stale);
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("database update failed (17)") && error.contains("PGP signature"),
+            "stale signature must be refused as an invalid database signature, got: {error}"
+        );
+    }
+
+    #[test]
+    fn database_optional_accepts_unsigned_arch_database() {
+        // Arch core/extra/multilib publish no database signatures.
+        let (lab, result) = sync_with_database_optional(DatabaseSignature::Absent);
+        result.unwrap();
+        assert!(lab.db().join("sync/rwr-test.db").is_file());
+        assert!(!lab.db().join("sync/rwr-test.db.sig").exists());
+    }
+
+    #[test]
+    fn pre_019_optional_mapping_ignored_stale_database_signature() {
+        // Documents the 0.1.0-18 defect: without ALPM_SIG_DATABASE libalpm
+        // neither fetched nor checked the stale signature and accepted the
+        // database. If this ever fails, the contrast above lost its meaning.
+        use crate::libalpm_ffi::AlpmHandle;
+        let lab = AlpmLab::create().unwrap();
+        prepare_lab_database_signature(&lab, DatabaseSignature::Stale);
+        let handle = AlpmHandle::new_isolated_lab(&lab).unwrap();
+        handle.set_lab_architecture().unwrap();
+        handle.configure_lab_options(&lab).unwrap();
+        let db = handle
+            .register_fixed_lab_repository_with_pre_019_optional_mapping(&lab.repository())
+            .unwrap();
+        handle.update_database(db, true).unwrap();
+        assert!(!lab.db().join("sync/rwr-test.db.sig").exists());
+    }
+
+    #[test]
     fn strict_lab_plan_accepts_only_fixed_upgrade() {
         use crate::libalpm_ffi::{AlpmPlannedPackage, AlpmTransactionPlan};
         let package = |name: &str, version: &str| AlpmPlannedPackage {

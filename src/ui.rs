@@ -53,8 +53,6 @@ struct UiState {
     ufo_real_stage: Option<UfoStage>,
     ufo_real_detail: String,
     transaction_result: Option<UiTransactionResult>,
-    /// FBI ACCESS AUTHORIZATION card: presentation of system Polkit only.
-    fbi_access: Option<crate::fbi_access::FbiAccess>,
 }
 
 /// Presentation only: an IPC error never becomes a successful transaction.
@@ -113,10 +111,6 @@ fn start_manual_result_check(
     match crate::production_ipc::reconnect_production_session(request) {
         Ok((events, answers)) => {
             state.borrow_mut().real_update_active = true;
-            state.borrow_mut().fbi_access = Some(crate::fbi_access::FbiAccess::awaiting(
-                crate::fbi_access::AccessKind::Inspect,
-                &request.transaction_id,
-            ));
             reset_ufo_transaction(state);
             poll_production_ipc_events(
                 events,
@@ -1023,8 +1017,6 @@ fn scan(
         stop_analysis(&mut state);
         state.analysis_cancelled = false;
         state.scanning = true;
-        // A new scan/plan starts a new case: clear an old ACCESS DENIED card.
-        state.fbi_access = None;
         state.confirmed_plan = None;
         state.updates = None;
         state.changelogs.clear();
@@ -1314,8 +1306,6 @@ pub fn build_ui(app: &Application) {
     controls.append(&status_row);
     root.append(&controls);
     root.append(&ufo_strip);
-    let fbi_card = crate::fbi_access::build_card();
-    root.append(&fbi_card.root);
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
@@ -1411,7 +1401,6 @@ pub fn build_ui(app: &Application) {
         ufo_real_stage: None,
         ufo_real_detail: String::new(),
         transaction_result: None,
-        fbi_access: None,
     }));
 
     {
@@ -1476,27 +1465,6 @@ pub fn build_ui(app: &Application) {
                 );
             });
             dialog.present();
-        });
-    }
-
-    {
-        let state = Rc::clone(&state);
-        let card_window = window.downgrade();
-        let mut shown: Option<(Option<crate::fbi_access::FbiAccess>, bool)> = None;
-        glib::timeout_add_local(Duration::from_millis(150), move || {
-            if card_window.upgrade().is_none() {
-                return glib::ControlFlow::Break;
-            }
-            let current = state.borrow();
-            let view = (
-                current.fbi_access.clone(),
-                matches!(current.language, Language::English),
-            );
-            if shown.as_ref() != Some(&view) {
-                crate::fbi_access::update_card(&fbi_card, view.0.as_ref(), view.1);
-                shown = Some(view);
-            }
-            glib::ControlFlow::Continue
         });
     }
 
@@ -2292,9 +2260,6 @@ fn poll_production_ipc_events(
         };
         match receiver.try_recv() {
             Ok(ProductionIpcEvent::Snapshot(value)) => {
-                if let Some(access) = state.borrow_mut().fbi_access.as_mut() {
-                    access.on_snapshot(&value);
-                }
                 state.borrow_mut().real_update_can_interrupt = value["outcome"] == "running"
                     && value["partial_installation_possible"] == false
                     && matches!(value["phase"].as_str(), Some("prepare" | "ready"));
@@ -2418,17 +2383,6 @@ fn poll_production_ipc_events(
                 glib::ControlFlow::Continue
             }
             Ok(ProductionIpcEvent::Finished(result)) => {
-                {
-                    let text = match &result {
-                        Err(error) => error.clone(),
-                        Ok(_) => last_progress.clone(),
-                    };
-                    let mut current = state.borrow_mut();
-                    current.fbi_access = current
-                        .fbi_access
-                        .take()
-                        .and_then(|a| a.after_finished(&text));
-                }
                 let language = state.borrow().language;
                 let kind = result_kind(&result);
                 let message = match result {
@@ -2499,23 +2453,12 @@ fn poll_production_ipc_events(
                     &state,
                 );
                 status.set_text(&message);
-                if kind == ResultKind::Success {
-                    scan(
-                        &list,
-                        &status,
-                        &scan_button,
-                        &install_button,
-                        &footer,
-                        &state,
-                    );
-                }
                 glib::ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => {
                 {
                     let mut current = state.borrow_mut();
-                    current.fbi_access = None;
                     current.transaction_result = Some(UiTransactionResult {
                         kind: ResultKind::Unknown,
                         detail: tr(
@@ -2605,8 +2548,10 @@ fn request_supervisor_lab(window: &ApplicationWindow, socket: std::path::PathBuf
 
 // ALPM PREPARE and revalidation run outside GTK. Neither action executes COMMIT.
 
+pub(crate) const ADMIN_ENABLE_COMMAND: &str = "sudo rwr-package-intelligence-admin enable";
+
 fn execution_block_message(language: Language, reason: &str) -> String {
-    format!(
+    let mut message = format!(
         "{}\n\n{}\n\n{reason}",
         tr(
             language,
@@ -2614,7 +2559,20 @@ fn execution_block_message(language: Language, reason: &str) -> String {
             "The plan was checked, but installation was not started. A valid execution policy and an available SYSTEM backend are required. Polkit authorization and separate transaction confirmation are still required."
         ),
         rwr_package_intelligence::supervisor_trust::SYSTEM_EXECUTION_POLICY
-    )
+    );
+    // Deployment gate closed: name the one supported administrator opt-in.
+    // It opens nothing by itself; Polkit and confirmation are still required.
+    if reason.contains("REAL MODE locked") {
+        message.push_str("\n\n");
+        message.push_str(&tr(
+            language,
+            "Jednorazowe włączenie przez administratora (w terminalu):",
+            "One-time administrator opt-in (in a terminal):",
+        ));
+        message.push('\n');
+        message.push_str(ADMIN_ENABLE_COMMAND);
+    }
+    message
 }
 
 fn present_execution_block(
@@ -2812,11 +2770,6 @@ fn request_system_upgrade_dialog(
         match result {
             Ok((events, answers)) => {
                 production_state.borrow_mut().real_update_active = true;
-                production_state.borrow_mut().fbi_access =
-                    Some(crate::fbi_access::FbiAccess::awaiting(
-                        crate::fbi_access::AccessKind::Execute,
-                        &confirmed_request.transaction_id,
-                    ));
                 reset_ufo_transaction(&production_state);
                 production_state.borrow_mut().execution_reference = Some(confirmed_request.clone());
                 production_state.borrow_mut().confirmed_plan = None;
@@ -3115,8 +3068,6 @@ fn request_full_upgrade_plan(
         }
         current.confirmed_plan = None;
         current.preparing_upgrade = true;
-        // A new scan/plan starts a new case: clear an old ACCESS DENIED card.
-        current.fbi_access = None;
         current.analysis_generation
     };
     update_install_availability(install, &state.borrow());
@@ -3478,7 +3429,6 @@ mod unified_update_ufo_tests {
             ufo_real_stage: None,
             ufo_real_detail: String::new(),
             transaction_result: None,
-            fbi_access: None,
         }
     }
     #[test]
@@ -3611,10 +3561,15 @@ mod unified_update_ufo_tests {
             let message = execution_block_message(language, &reason);
             assert!(message.contains(&reason));
             assert!(message.contains("Polkit"));
+            assert!(message.contains(ADMIN_ENABLE_COMMAND));
         }
+        let denied = execution_block_message(Language::English, "denied");
+        assert!(denied.contains("installation was not started"));
+        // Only a closed deployment gate points to the opt-in; other refusals do not.
+        assert!(!denied.contains(ADMIN_ENABLE_COMMAND));
         assert!(
-            execution_block_message(Language::English, "denied")
-                .contains("installation was not started")
+            execution_block_message(Language::Polish, "REAL MODE locked: x")
+                .contains("Jednorazowe włączenie")
         );
     }
 }

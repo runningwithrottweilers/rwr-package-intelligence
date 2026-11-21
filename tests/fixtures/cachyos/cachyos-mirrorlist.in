@@ -1,0 +1,3 @@
+Server = http://first.example.invalid/optimized/@TIER@/$repo
+Server = https://second.example.invalid/optimized/@TIER@/$repo
+Server = https://third.example.invalid/optimized/@TIER@/$repo

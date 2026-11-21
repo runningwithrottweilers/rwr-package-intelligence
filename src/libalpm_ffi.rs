@@ -152,7 +152,38 @@ impl AlpmHandle {
 
         let mut handle = Self::new(&root, &dbpath)?;
         handle.origin = AlpmHandleOrigin::IsolatedLab;
+        // Crypto-capable calls require a selected GPG home (crypto_context).
+        // The laboratory gets its own empty keyring, never the host keyring.
+        handle.set_private_gpgdir(&root.join("etc/pacman.d/gnupg"))?;
         Ok(handle)
+    }
+
+    /// Test-only handle over a private root/db with a private empty keyring.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(root: &Path, dbpath: &Path) -> Result<Self, String> {
+        let mut handle = Self::new(root, dbpath)?;
+        handle.set_private_gpgdir(&dbpath.join("gnupg"))?;
+        Ok(handle)
+    }
+
+    /// Non-system handles only: refuse the host keyring and system paths.
+    fn set_private_gpgdir(&mut self, dir: &Path) -> Result<(), String> {
+        use std::os::unix::ffi::OsStrExt;
+        if !matches!(
+            self.origin,
+            AlpmHandleOrigin::Untrusted | AlpmHandleOrigin::IsolatedLab
+        ) || !dir.is_absolute()
+            || dir.starts_with("/etc/pacman.d")
+        {
+            return Err("Private GPG directory refused for this handle".into());
+        }
+        std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create private GPG directory: {e}"))?;
+        let gpg = CString::new(dir.as_os_str().as_bytes())
+            .map_err(|_| "Invalid private GPG directory".to_string())?;
+        if unsafe { alpm_option_set_gpgdir(self.raw.as_ptr(), gpg.as_ptr()) } != 0 {
+            return Err("Cannot configure private libalpm GPG directory".into());
+        }
+        Ok(())
     }
 }
 
@@ -359,7 +390,7 @@ mod handle_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let _handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let _handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
         }
 
         std::fs::remove_dir_all(&base).unwrap();
@@ -410,7 +441,7 @@ mod localdb_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
             assert_eq!(handle.local_package_count().unwrap(), 0);
         }
 
@@ -476,6 +507,32 @@ impl AlpmHandle {
         )
     }
 
+    /// Test only: the fixture repository registered with the signature level
+    /// production derives from a pacman SigLevel policy (`signature_level`).
+    #[cfg(test)]
+    pub(crate) fn register_fixed_lab_repository_with_policy(
+        &self,
+        repository: &Path,
+        policy: &[&str],
+    ) -> Result<*mut RawAlpmDb, String> {
+        let policy: Vec<String> = policy.iter().map(|entry| entry.to_string()).collect();
+        self.register_fixed_lab_repository_with_siglevel(repository, signature_level(&policy)?)
+    }
+
+    /// Test only: the 0.1.0-18 mapping of `DatabaseOptional` (the optional
+    /// bit without ALPM_SIG_DATABASE), kept to prove the regression test
+    /// detects the stale-signature defect.
+    #[cfg(test)]
+    pub(crate) fn register_fixed_lab_repository_with_pre_019_optional_mapping(
+        &self,
+        repository: &Path,
+    ) -> Result<*mut RawAlpmDb, String> {
+        self.register_fixed_lab_repository_with_siglevel(
+            repository,
+            ALPM_SIG_PACKAGE | ALPM_SIG_DATABASE_OPTIONAL,
+        )
+    }
+
     fn register_fixed_lab_repository_with_siglevel(
         &self,
         repository: &Path,
@@ -521,7 +578,9 @@ impl AlpmHandle {
         let result = unsafe { alpm_db_update(self.raw.as_ptr(), list, if force { 1 } else { 0 }) };
         unsafe { alpm_list_free(list) };
 
-        if result != 0 {
+        // libalpm 16.0.1 returns 0 on success, 1 when every database was
+        // already up to date, and -1 with pm_errno set on error.
+        if result < 0 {
             return Err(transaction_error(self, "database update"));
         }
 
@@ -564,7 +623,7 @@ mod repository_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
             handle
                 .register_test_repository("rwr-test", "https://example.invalid/rwr-test")
                 .unwrap();
@@ -580,6 +639,28 @@ const ALPM_SIG_PACKAGE_OPTIONAL: i32 = 1 << 1;
 const ALPM_SIG_DATABASE: i32 = 1 << 10;
 const ALPM_SIG_DATABASE_OPTIONAL: i32 = 1 << 11;
 
+/// pacman (src/pacman/conf.c) maps Optional to VERIFY | OPTIONAL: a signature is
+/// downloaded and checked when present. The verify bit must never be dropped:
+/// without ALPM_SIG_DATABASE libalpm neither downloads nor checks <repo>.db.sig
+/// during alpm_db_update, which leaves a stale signature beside a new database.
+fn package_signature_mode(entry: &str) -> Option<i32> {
+    match entry {
+        "PackageRequired" => Some(ALPM_SIG_PACKAGE),
+        "PackageOptional" => Some(ALPM_SIG_PACKAGE | ALPM_SIG_PACKAGE_OPTIONAL),
+        "PackageNever" => Some(0),
+        _ => None,
+    }
+}
+
+fn database_signature_mode(entry: &str) -> Option<i32> {
+    match entry {
+        "DatabaseRequired" => Some(ALPM_SIG_DATABASE),
+        "DatabaseOptional" => Some(ALPM_SIG_DATABASE | ALPM_SIG_DATABASE_OPTIONAL),
+        "DatabaseNever" => Some(0),
+        _ => None,
+    }
+}
+
 fn signature_level(policy: &[String]) -> Result<i32, String> {
     let mut package_mode = None;
     let mut database_mode = None;
@@ -587,29 +668,21 @@ fn signature_level(policy: &[String]) -> Result<i32, String> {
     let mut database_trusted = false;
 
     for entry in policy {
+        if let Some(mode) = package_signature_mode(entry) {
+            if package_mode.is_some() {
+                return Err("Duplicate or conflicting package signature mode".into());
+            }
+            package_mode = Some(mode);
+            continue;
+        }
+        if let Some(mode) = database_signature_mode(entry) {
+            if database_mode.is_some() {
+                return Err("Duplicate or conflicting database signature mode".into());
+            }
+            database_mode = Some(mode);
+            continue;
+        }
         match entry.as_str() {
-            "PackageRequired" | "PackageOptional" | "PackageNever" => {
-                if package_mode.is_some() {
-                    return Err("Duplicate or conflicting package signature mode".into());
-                }
-
-                package_mode = Some(match entry.as_str() {
-                    "PackageRequired" => ALPM_SIG_PACKAGE,
-                    "PackageOptional" => ALPM_SIG_PACKAGE_OPTIONAL,
-                    _ => 0,
-                });
-            }
-            "DatabaseRequired" | "DatabaseOptional" | "DatabaseNever" => {
-                if database_mode.is_some() {
-                    return Err("Duplicate or conflicting database signature mode".into());
-                }
-
-                database_mode = Some(match entry.as_str() {
-                    "DatabaseRequired" => ALPM_SIG_DATABASE,
-                    "DatabaseOptional" => ALPM_SIG_DATABASE_OPTIONAL,
-                    _ => 0,
-                });
-            }
             "PackageTrustedOnly" => {
                 if package_trusted {
                     return Err("Duplicate package trust directive".into());
@@ -650,7 +723,92 @@ mod signature_tests {
             "DatabaseTrustedOnly".to_string(),
         ];
 
-        assert_eq!(super::signature_level(&policy).unwrap(), 2049);
+        // PACKAGE | DATABASE | DATABASE_OPTIONAL, as pacman computes it.
+        assert_eq!(super::signature_level(&policy).unwrap(), 3073);
+    }
+
+    fn level(entries: &[&str]) -> Result<i32, String> {
+        let policy: Vec<String> = entries.iter().map(|e| e.to_string()).collect();
+        super::signature_level(&policy)
+    }
+
+    const PKG: i32 = super::ALPM_SIG_PACKAGE;
+    const PKG_OPT: i32 = super::ALPM_SIG_PACKAGE_OPTIONAL;
+    const DB: i32 = super::ALPM_SIG_DATABASE;
+    const DB_OPT: i32 = super::ALPM_SIG_DATABASE_OPTIONAL;
+
+    #[test]
+    fn all_database_modes_with_required_packages() {
+        let base = ["PackageRequired", "PackageTrustedOnly", "DatabaseTrustedOnly"];
+        let with = |mode: &str| {
+            let mut entries = base.to_vec();
+            entries.push(mode);
+            level(&entries)
+        };
+        assert_eq!(with("DatabaseRequired").unwrap(), PKG | DB);
+        assert_eq!(with("DatabaseOptional").unwrap(), PKG | DB | DB_OPT);
+        assert!(with("DatabaseNever").is_err());
+    }
+
+    #[test]
+    fn all_package_modes_keep_policy_strict() {
+        for (mode, accepted) in [
+            ("PackageRequired", true),
+            ("PackageOptional", false),
+            ("PackageNever", false),
+        ] {
+            let result = level(&[
+                mode,
+                "PackageTrustedOnly",
+                "DatabaseOptional",
+                "DatabaseTrustedOnly",
+            ]);
+            assert_eq!(result.is_ok(), accepted, "{mode}");
+        }
+    }
+
+    #[test]
+    fn optional_modes_never_drop_the_verify_bit() {
+        // Regression: Optional used to map to the *_OPTIONAL bit alone, so
+        // libalpm skipped <repo>.db.sig and left stale signatures behind.
+        let db = level(&[
+            "PackageRequired",
+            "PackageTrustedOnly",
+            "DatabaseOptional",
+            "DatabaseTrustedOnly",
+        ])
+        .unwrap();
+        assert_ne!(db & DB, 0);
+        assert_ne!(db & DB_OPT, 0);
+        assert_eq!(db & PKG_OPT, 0);
+    }
+
+    #[test]
+    fn package_optional_maps_like_pacman() {
+        assert_eq!(super::package_signature_mode("PackageRequired"), Some(PKG));
+        assert_eq!(super::package_signature_mode("PackageOptional"), Some(PKG | PKG_OPT));
+        assert_eq!(super::package_signature_mode("PackageNever"), Some(0));
+        assert_eq!(super::database_signature_mode("DatabaseRequired"), Some(DB));
+        assert_eq!(super::database_signature_mode("DatabaseOptional"), Some(DB | DB_OPT));
+        assert_eq!(super::database_signature_mode("DatabaseNever"), Some(0));
+        assert_eq!(super::package_signature_mode("DatabaseOptional"), None);
+        assert_eq!(super::database_signature_mode("PackageOptional"), None);
+    }
+
+    #[test]
+    fn trust_and_mode_directives_remain_mandatory() {
+        assert!(level(&["PackageRequired", "PackageTrustedOnly", "DatabaseOptional"]).is_err());
+        assert!(level(&["PackageRequired", "DatabaseOptional", "DatabaseTrustedOnly"]).is_err());
+        assert!(level(&["PackageRequired", "PackageTrustedOnly", "DatabaseTrustedOnly"]).is_err());
+        assert!(level(&["PackageTrustedOnly", "DatabaseOptional", "DatabaseTrustedOnly"]).is_err());
+        assert!(level(&[
+            "PackageRequired",
+            "PackageTrustedOnly",
+            "DatabaseOptional",
+            "DatabaseTrustedOnly",
+            "TrustAll"
+        ])
+        .is_err());
     }
 
     #[test]
@@ -806,7 +964,7 @@ mod configured_repository_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
             let count = handle.register_configured_repositories(&config).unwrap();
 
             println!("Registered repositories: {count}");
@@ -844,6 +1002,21 @@ impl AlpmHandle {
 
         Ok(())
     }
+
+    /// `pacman-conf Architecture` prints one architecture per line. With
+    /// `Architecture = auto` CachyOS resolves to several (x86_64, x86_64_v2,
+    /// x86_64_v3, x86_64_v4); each one is validated and registered separately.
+    fn set_configured_architectures(&self, configured: &str) -> Result<(), String> {
+        let mut registered = 0usize;
+        for architecture in configured.lines().map(str::trim).filter(|a| !a.is_empty()) {
+            self.set_architecture(architecture)?;
+            registered += 1;
+        }
+        if registered == 0 {
+            return Err("Invalid package architecture".into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -861,11 +1034,16 @@ mod architecture_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
-            handle.set_architecture(&config.architecture).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
+            handle.set_configured_architectures(&config.architecture).unwrap();
 
             assert!(handle.set_architecture("").is_err());
             assert!(handle.set_architecture("invalid arch").is_err());
+            assert!(handle.set_configured_architectures("").is_err());
+            assert!(handle.set_configured_architectures("x86_64\ninvalid arch").is_err());
+            handle
+                .set_configured_architectures("x86_64\nx86_64_v2\nx86_64_v3\nx86_64_v4\n")
+                .unwrap();
 
             println!("Architecture: {}", config.architecture);
         }
@@ -904,7 +1082,7 @@ impl AlpmHandle {
     /// Does not synchronize databases, download packages or commit transactions.
     pub fn configure(&self, config: &PacmanConfig) -> Result<usize, String> {
         self.configure_system_options(&config.cache_dir, &config.gpg_dir, config.check_space)?;
-        self.set_architecture(&config.architecture)?;
+        self.set_configured_architectures(&config.architecture)?;
         self.configure_transaction_options(config)?;
         self.register_configured_repositories(config)
     }
@@ -925,7 +1103,7 @@ mod configuration_integration_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
             let registered = handle.configure(&config).unwrap();
 
             println!("Architecture: {}", config.architecture);
@@ -1019,7 +1197,7 @@ mod system_options_tests {
         }
 
         {
-            let handle = super::AlpmHandle::new(&root, &db).unwrap();
+            let handle = super::AlpmHandle::new_for_test(&root, &db).unwrap();
 
             handle
                 .configure_system_options(cache.to_str().unwrap(), gpg.to_str().unwrap(), true)
@@ -1106,7 +1284,7 @@ mod option_readback_tests {
         }
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             handle
                 .configure_system_options(cache.to_str().unwrap(), gpg.to_str().unwrap(), true)
                 .unwrap();
@@ -1230,6 +1408,29 @@ mod list_readback_tests {
     }
 
     #[test]
+    fn registers_every_cachyos_architecture_tier() {
+        // CachyOS `Architecture = auto` as printed by pacman-conf (one per line).
+        let base =
+            std::env::temp_dir().join(format!("rwr-alpm-arch-tiers-{}", std::process::id()));
+        let root = base.join("root");
+        let db = base.join("db");
+        for dir in [&root, &db] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        {
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
+            assert!(handle.set_configured_architectures("\n \n").is_err());
+            handle
+                .set_configured_architectures("x86_64\nx86_64_v2\nx86_64_v3\nx86_64_v4\n")
+                .unwrap();
+            let registered =
+                unsafe { list_strings(alpm_option_get_architectures(handle.raw.as_ptr())) };
+            assert_eq!(registered, ["x86_64", "x86_64_v2", "x86_64_v3", "x86_64_v4"]);
+        }
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn verifies_isolated_list_options() {
         let base =
             std::env::temp_dir().join(format!("rwr-alpm-list-readback-{}", std::process::id()));
@@ -1244,7 +1445,7 @@ mod list_readback_tests {
         }
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             handle
                 .configure_system_options(cache.to_str().unwrap(), gpg.to_str().unwrap(), true)
                 .unwrap();
@@ -1757,7 +1958,7 @@ mod isolated_upgrade_selection_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut tx = AlpmTransaction::begin(&handle).unwrap();
             tx.select_system_upgrade().unwrap();
             assert!(tx.planned_packages().unwrap().add.is_empty());
@@ -1781,7 +1982,7 @@ mod isolated_upgrade_selection_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut tx = AlpmTransaction::begin(&handle).unwrap();
             handle.transaction_poisoned.set(true);
             assert!(tx.select_system_upgrade().is_err());
@@ -1807,7 +2008,7 @@ mod transaction_plan_snapshot_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             let before = transaction.planned_packages().unwrap();
             assert!(before.add.is_empty() && before.remove.is_empty());
@@ -1832,7 +2033,7 @@ mod transaction_plan_snapshot_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             transaction.phase = AlpmTransactionPhase::Failed;
             assert!(transaction.planned_packages().is_err());
@@ -1858,7 +2059,7 @@ mod transaction_phase_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             assert_eq!(transaction.phase, AlpmTransactionPhase::Initialized);
             transaction.prepare().unwrap();
@@ -1882,7 +2083,7 @@ mod transaction_phase_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             transaction.phase = AlpmTransactionPhase::Failed;
             assert!(transaction.prepare().is_err());
@@ -1909,7 +2110,7 @@ mod transaction_poison_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             handle.transaction_poisoned.set(true);
             assert!(transaction.prepare().is_err());
@@ -1936,7 +2137,7 @@ mod transaction_raii_tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let transaction = AlpmTransaction::begin(&handle).unwrap();
             assert!(AlpmTransaction::begin(&handle).is_err());
             transaction.release().unwrap();
@@ -1970,7 +2171,7 @@ mod isolated_transaction_lifecycle_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
 
             assert_eq!(
                 unsafe { alpm_trans_init(handle.raw.as_ptr(), 0) },
@@ -2011,7 +2212,7 @@ mod commit_diagnostics_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let empty = std::ptr::null_mut();
 
             free_commit_diagnostics(&handle, empty, ALPM_ERR_FILE_CONFLICTS).unwrap();
@@ -2040,7 +2241,7 @@ mod commit_gate_tests {
         let db = base.join("db");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&db).unwrap();
-        let handle = AlpmHandle::new(&root, &db).unwrap();
+        let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
         let mut tx = AlpmTransaction::begin(&handle).unwrap();
         tx.prepare().unwrap();
         assert_eq!(tx.phase, AlpmTransactionPhase::Prepared);
@@ -2101,7 +2302,7 @@ mod isolated_prepare_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
 
             let mut transaction = AlpmTransaction::begin(&handle).unwrap();
             transaction
@@ -2146,7 +2347,7 @@ mod isolated_transaction_state_tests {
         std::fs::create_dir_all(&db).unwrap();
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             let raw = handle.raw.as_ptr();
 
             assert_eq!(unsafe { alpm_trans_init(raw, 0) }, 0);
@@ -2372,7 +2573,7 @@ mod isolated_fixture_upgrade_tests {
         .unwrap();
 
         {
-            let handle = AlpmHandle::new(&root, &db).unwrap();
+            let handle = AlpmHandle::new_for_test(&root, &db).unwrap();
             handle.set_architecture("x86_64").unwrap();
             assert_eq!(handle.local_package_count().unwrap(), 1);
             // Test-only unsigned repository; no production configuration is changed.
@@ -2473,7 +2674,7 @@ mod callback_registration_tests {
         let handle_root = lab.root();
         let handle_db = lab.db();
 
-        let mut handle = AlpmHandle::new(handle_root, handle_db).unwrap();
+        let mut handle = AlpmHandle::new_for_test(handle_root, handle_db).unwrap();
 
         assert!(handle.register_lab_event_callback().is_err());
         assert_eq!(handle.laboratory_event_count(), 0);
@@ -3953,6 +4154,150 @@ mod https_execution_policy_tests {
                 .flat_map(|(_, servers)| servers)
                 .all(|url| url.starts_with("https://"))
         );
+    }
+
+    #[test]
+    fn cachyos_fixture_repositories_keep_includes_order_architecture_and_trust() {
+        use super::{AlpmHandle, CStr, alpm_db_get_name, alpm_get_syncdbs, pacman_conf};
+        use std::path::Path;
+        // All paths and mirrors are synthetic. pacman-conf parses Include and
+        // expands variables; registering databases never refreshes/downloads them.
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cachyos");
+        for tier in ["v3", "v4", "znver4"] {
+            let base = std::env::temp_dir()
+                .join(format!("rwr-cachyos-config-{}-{tier}", std::process::id()));
+            std::fs::create_dir_all(&base).unwrap();
+            for name in ["root", "db", "gnupg"] {
+                std::fs::create_dir_all(base.join(name)).unwrap();
+            }
+            for name in [
+                "cachyos-mirrorlist.in",
+                "arch-mirrorlist.in",
+                "pacman.conf.in",
+            ] {
+                let text = std::fs::read_to_string(fixtures.join(name))
+                    .unwrap()
+                    .replace("@TIER@", tier)
+                    .replace("@MIRRORS@", base.to_str().unwrap());
+                std::fs::write(base.join(name), text).unwrap();
+            }
+            let file = base.join("pacman.conf.in");
+            let query = |args: &[&str]| {
+                let mut flags = vec!["--config", file.to_str().unwrap()];
+                flags.extend_from_slice(args);
+                pacman_conf(&flags)
+                    .unwrap()
+                    .lines()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            let repositories = query(&["--repo-list"]);
+            assert_eq!(
+                repositories,
+                vec![
+                    format!("cachyos-{tier}"),
+                    format!("cachyos-core-{tier}"),
+                    format!("cachyos-extra-{tier}"),
+                    "cachyos".into(),
+                    "core".into(),
+                    "extra".into(),
+                    "multilib".into(),
+                ]
+            );
+            let servers: Vec<_> = repositories
+                .iter()
+                .map(|repo| (repo.clone(), query(&["--repo", repo, "Server"])))
+                .collect();
+            let borrowed = servers
+                .iter()
+                .map(|(r, urls)| (r.as_str(), urls.iter().map(String::as_str).collect()))
+                .collect();
+            let mut original = config(borrowed);
+            original.architecture = query(&["Architecture"]).join("\n");
+            original.signature_policy = query(&["SigLevel"]);
+            original.repository_signature_policies = repositories
+                .iter()
+                .map(|repo| (repo.clone(), query(&["--repo", repo, "SigLevel"])))
+                .collect();
+            original.ignore_pkg = query(&["IgnorePkg"]);
+            original.no_upgrade = query(&["NoUpgrade"]);
+            original.root = base.join("root").to_str().unwrap().into();
+            original.db_path = base.join("db").to_str().unwrap().into();
+            original.gpg_dir = base.join("gnupg").to_str().unwrap().into();
+            // `Architecture = auto`: plain Arch pacman resolves to x86_64 only,
+            // CachyOS pacman to x86_64 plus the CPU-supported x86_64_vN tiers.
+            let architectures: Vec<&str> = original.architecture.lines().collect();
+            assert_eq!(architectures.first(), Some(&"x86_64"));
+            assert!(
+                architectures.iter().all(|a| ["x86_64", "x86_64_v2", "x86_64_v3", "x86_64_v4"]
+                    .contains(a)),
+                "{architectures:?}"
+            );
+            assert_eq!(original.ignore_pkg, ["linux-cachyos-lts"]);
+            let effective = original.https_only_execution().unwrap();
+            assert_eq!(effective.repositories, repositories);
+            assert_eq!(
+                effective.repository_servers[0].1,
+                vec![
+                    format!("https://second.example.invalid/optimized/{tier}/cachyos-{tier}"),
+                    format!("https://third.example.invalid/optimized/{tier}/cachyos-{tier}"),
+                ]
+            );
+            assert_eq!(
+                effective.repository_servers[4].1,
+                ["https://arch.example.invalid/core/os/x86_64"]
+            );
+            assert_eq!(effective.signature_policy, original.signature_policy);
+            assert_eq!(
+                effective.repository_signature_policies,
+                original.repository_signature_policies
+            );
+            assert!(
+                effective.repository_signature_policies[2]
+                    .1
+                    .contains(&"DatabaseRequired".into())
+            );
+            let handle =
+                AlpmHandle::new(Path::new(&effective.root), Path::new(&effective.db_path)).unwrap();
+            handle
+                .configure_system_options(base.to_str().unwrap(), &effective.gpg_dir, true)
+                .unwrap();
+            handle.set_configured_architectures(&effective.architecture).unwrap();
+            assert_eq!(
+                handle.register_configured_repositories(&effective).unwrap(),
+                repositories.len()
+            );
+            let mut node = unsafe { alpm_get_syncdbs(handle.raw.as_ptr()) };
+            let mut registered = Vec::new();
+            while !node.is_null() {
+                let db = unsafe { (*node).data }.cast();
+                registered.push(
+                    unsafe { CStr::from_ptr(alpm_db_get_name(db)) }
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+                node = unsafe { (*node).next };
+            }
+            assert_eq!(registered, repositories);
+            let mut without_https = original.clone();
+            without_https.repository_servers[0].1 = vec!["http://only.example.invalid/repo".into()];
+            assert!(
+                without_https
+                    .https_only_execution()
+                    .unwrap_err()
+                    .contains(&repositories[0])
+            );
+            let mut unsafe_policy = effective.clone();
+            unsafe_policy.repository_signature_policies[0].1 = vec!["Never".into()];
+            assert!(
+                handle
+                    .register_configured_repositories(&unsafe_policy)
+                    .is_err()
+            );
+            drop(handle);
+            std::fs::remove_dir_all(base).unwrap();
+        }
     }
 
     #[test]

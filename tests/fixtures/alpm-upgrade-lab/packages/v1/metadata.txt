@@ -1,0 +1,2 @@
+pkgname = rwr-test-package
+pkgver = 1.0-1

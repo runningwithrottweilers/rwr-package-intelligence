@@ -1,22 +1,22 @@
 # Maintainer: RUNNING WITH ROTTWEILERS
-# Public beta candidate for Arch Linux
+# Local development package — not for AUR submission
 
 pkgname=rwr-package-intelligence
 pkgver=0.1.0
-pkgrel=17
-pkgdesc="Arch Linux update planning and supervised installation"
+pkgrel=19
+pkgdesc="Arch Linux / CachyOS update intelligence with a Polkit-gated transaction backend (default-deny)"
 arch=(x86_64)
 url="https://github.com/runningwithrottweilers"
 license=("MIT")
 depends=("glibc" "gcc-libs" "gtk4" "pacman" "pacman-contrib"
          "polkit" "systemd" "gpgme" "gnupg" "libseccomp" "libalpm.so=16-64" "libgpgme.so=45-64"
-         "glib2" "cairo" "gdk-pixbuf2" "curl" "tar")
+         "glib2" "cairo" "gdk-pixbuf2")
 makedepends=("rust" "pkgconf")
 options=(!debug)
 # Generate the pinned local snapshot with backend-package.py prepare.
 _srcname="${pkgname}-${pkgver}"
 source=("${_srcname}-backend${pkgrel}.tar.gz")
-sha256sums=("0e8b144c051363cc756dbf209e56f54b177d569f4bfeafc02e721626ac1209a3")
+sha256sums=("c41dcd17c1a274a36157b5e5ae3b3fb642b78447361c6cfb42ee18df22650358")
 
 prepare() {
     cd "$srcdir/$_srcname"
@@ -28,9 +28,9 @@ prepare() {
 
 build() {
     cd "$srcdir/$_srcname"
-    export RWR_BUILD_SOURCE="$srcdir"
-    export RWR_BUILD_TARGET="${CARGO_TARGET_DIR:-$PWD/target}"
-    export RUSTC_WRAPPER="$PWD/packaging/arch/release-rustc.sh"
+    # Normalize diagnostic/source locations in all crates, including Cargo registry dependencies.
+    # Keep the same release profile, application code and runtime gates.
+    export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$HOME=/build-user --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$srcdir=/usr/src/rwr-package-intelligence"
     cargo build --release --locked --offline \
         --bin rwr-package-intelligence --bin rwr-update-helper \
         --bin rwr-transaction-supervisor
@@ -39,7 +39,7 @@ build() {
 package() {
 
     cd "$srcdir/$_srcname"
-    # Privileged helper gated by administrator policy and Polkit.
+    # Privileged Rust helper — execution gated at runtime by the root-owned policy.
     install -Dm755 target/release/rwr-update-helper "$pkgdir/usr/lib/rwr-package-intelligence/rwr-update-helper"
     install -Dm755 target/release/rwr-transaction-supervisor "$pkgdir/usr/lib/rwr-package-intelligence/rwr-transaction-supervisor"
 
@@ -55,6 +55,11 @@ package() {
     install -Dm644 packaging/polkit/io.github.runningwithrottweilers.rwr-package-intelligence.policy "$pkgdir/usr/share/polkit-1/actions/io.github.runningwithrottweilers.rwr-package-intelligence.policy"
 
     install -Dm755 target/release/rwr-package-intelligence         "$pkgdir/usr/bin/rwr-package-intelligence"
+
+    # Administrator opt-in (status/enable/disable). Ships no policy and enables
+    # nothing on install; REAL MODE stays locked until an administrator runs it.
+    install -Dm755 packaging/admin/rwr-package-intelligence-admin \
+        "$pkgdir/usr/bin/rwr-package-intelligence-admin"
 
     install -Dm644 packaging/arch/io.github.runningwithrottweilers.PackageIntelligence.desktop         "$pkgdir/usr/share/applications/io.github.runningwithrottweilers.PackageIntelligence.desktop"
 

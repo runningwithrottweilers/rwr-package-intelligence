@@ -113,6 +113,29 @@ fn check_updates_with(mut command: Command) -> Result<Vec<PackageUpdate>, String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cachyos_scanner_fixture_preserves_names_versions_and_epoch() {
+        let fixture = include_str!("../tests/fixtures/cachyos/checkupdates.txt");
+        // Exercise the real scanner's subprocess/output path, without running
+        // checkupdates or accessing any repository/database/network.
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "printf '%s' \"$1\"", "fixture", fixture]);
+        let updates = super::check_updates_with(command).unwrap();
+        assert_eq!(updates.len(), 4);
+        assert_eq!(updates[0].name, "linux-cachyos");
+        assert_eq!(updates[1].name, "linux-cachyos-lts");
+        assert_eq!(updates[2].name, "linux-cachyos-hardened-lto");
+        assert_eq!(updates[3].installed, "1:1.3.2-4");
+        assert_eq!(updates[3].available, "1:1.4-1");
+        for update in &updates[..3] {
+            assert_eq!(
+                crate::classification::classify(&update.name).category,
+                crate::classification::Category::Kernel
+            );
+        }
+        assert_eq!(updates, super::parse_updates(fixture).unwrap());
+    }
+
     use super::*;
 
     #[test]

@@ -1,7 +1,9 @@
-# SYSTEM service template. NOT installed/activated. REAL MODE remains false.
-# Separate from the existing read-only USER supervisor. Requires VM validation.
+# SYSTEM transaction supervisor. Shipped inactive and default-deny: it is only
+# socket-activated after `sudo rwr-package-intelligence-admin enable`, and every
+# transaction still requires Polkit authorization and a confirmed plan.
+# Separate from the read-only USER supervisor.
 [Unit]
-Description=RWR privileged transaction supervisor (execution locked)
+Description=RWR privileged transaction supervisor (Polkit-gated)
 Requires=rwr-package-intelligence-system.socket
 After=rwr-package-intelligence-system.socket polkit.service
 StartLimitIntervalSec=60
@@ -24,9 +26,9 @@ Restart=on-failure
 RestartSec=3
 # Only the broker receives stop signals. A helper already in COMMIT owns its
 # execution lease and durable journal; it must not die with its broker/GUI.
-# This lifecycle contract MUST be tested with real systemd in a separate VM.
 KillMode=process
 KillSignal=SIGTERM
 SendSIGKILL=no
 TimeoutStopSec=infinity
-# Deliberately no Install section. Never enable this template on the host.
+# Deliberately no Install section: activation is the administrator opt-in
+# (rwr-package-intelligence-admin adds the socket to sockets.target).
